@@ -45,7 +45,7 @@ export function toSRT(segs) {
     .join('\n');
 }
 
-export function cleanSegments(segs) {
+export function cleanSegments(segs, opts) {
   const sorted = segs
     .filter((x) => x.text && x.text.trim() && x.end > x.start)
     .map((x) => ({
@@ -63,7 +63,22 @@ export function cleanSegments(segs) {
     prevEnd = end;
     out.push({ start, end, text: x.text });
   }
-  return out;
+  return applyLinger(out, opts);
+}
+
+/**
+ * 讓字幕在語音結束後再多停留一段時間再消失，避免「突然不見」。
+ * - 語音結束後延伸 linger 秒（預設 0.8s），讓字幕有時間被看完
+ * - 至少顯示 minDisplay 秒，短片段不會一閃而過
+ * - 但不會越過下一段的開始（保留 gap 秒），字幕會在下一句出現前才消失
+ */
+export function applyLinger(segs, { linger = 0.8, minDisplay = 1.3, gap = 0.15 } = {}) {
+  return segs.map((s, i) => {
+    const next = segs[i + 1];
+    const cap = next ? Math.max(next.start - gap, s.end) : Infinity;
+    const end = Math.min(Math.max(s.end + linger, s.start + minDisplay), cap);
+    return { ...s, end };
+  });
 }
 
 const SENTENCE_END = /[。！？!?；;…]$/;

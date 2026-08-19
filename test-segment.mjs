@@ -1,4 +1,4 @@
-import { buildSegmentsFromWords, toSRT } from './src/srt.js';
+import { buildSegmentsFromWords, cleanSegments, toSRT } from './src/srt.js';
 
 // 模擬 Whisper 中文輸出：word 不含標點，靠停頓斷句
 // 每句話之間約 0.6-0.8 秒停頓，逗號處約 0.3 秒
@@ -52,4 +52,16 @@ const ok1 = s1.length === 3 && s1[0].text === '今天天氣很好' && s1[1].text
 const ok2 = s2.every((s) => [...s.text].length <= 42);
 const ok3 = s3.length === 3 && s3[0].text === 'Hello world,' && s3[1].text === 'this is a test' && s3[2].text === 'Goodbye friends';
 console.log('\n驗證:', { 中文斷句: ok1, 長句切分: ok2, 英文斷句: ok3 });
-process.exit(ok1 && ok2 && ok3 ? 0 : 1);
+
+// 停留時間測試：字幕應在語音結束後多停留，且不超過下一段開始
+const l = cleanSegments(s1);
+const speechEnds = [1.6, 3.6, 6.4];
+const nextStarts = [2.3, 4.2, Infinity];
+const ok4 = l.every((s, i) => {
+  const extended = s.end > speechEnds[i];          // 結束時間有延伸
+  const notPast = s.end <= (nextStarts[i] === Infinity ? Infinity : nextStarts[i] - 0.15); // 不越過下一段
+  return extended && notPast;
+});
+console.log('停留時間驗證:', l.map((s, i) => `${i + 1}[${s.start.toFixed(2)}-${s.end.toFixed(2)}] 語音止於 ${speechEnds[i]}s 延伸=${(s.end - speechEnds[i]).toFixed(2)}s`));
+console.log('驗證4（停留時間）:', ok4);
+process.exit(ok1 && ok2 && ok3 && ok4 ? 0 : 1);
