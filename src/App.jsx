@@ -8,11 +8,13 @@ import {
   fmtTime,
 } from './srt.js';
 import { extractAudio, isVideoFile } from './audio.js';
+import { convertSegments, OUTPUT_LANGS } from './lang.js';
 
 const LS = {
   provider: 'srt-studio:provider',
   key: 'srt-studio:key',
   lang: 'srt-studio:lang',
+  outLang: 'srt-studio:outlang',
   segs: 'srt-studio:segs',
 };
 
@@ -29,6 +31,7 @@ function App() {
   const [providerId, setProviderId] = useState(() => load(LS.provider, 'groq'));
   const [apiKey, setApiKey] = useState(() => load(LS.key, ''));
   const [language, setLanguage] = useState(() => load(LS.lang, 'auto'));
+  const [outputLang, setOutputLang] = useState(() => load(LS.outLang, 'traditional'));
 
   const [file, setFile] = useState(null);
   const [fileUrl, setFileUrl] = useState(null);
@@ -60,6 +63,7 @@ function App() {
   useEffect(() => localStorage.setItem(LS.provider, JSON.stringify(providerId)), [providerId]);
   useEffect(() => localStorage.setItem(LS.key, JSON.stringify(apiKey)), [apiKey]);
   useEffect(() => localStorage.setItem(LS.lang, JSON.stringify(language)), [language]);
+  useEffect(() => localStorage.setItem(LS.outLang, JSON.stringify(outputLang)), [outputLang]);
   useEffect(() => {
     localStorage.setItem(LS.segs, JSON.stringify(segments));
   }, [segments]);
@@ -154,14 +158,14 @@ function App() {
       const built = result.words?.length
         ? buildSegmentsFromWords(result.words)
         : result.segments;
-      setSegments(cleanSegments(built));
+      setSegments(await convertSegments(cleanSegments(built), outputLang));
       setProgress({ label: `辨識完成，共 ${built.length} 段`, pct: 1 });
     } catch (e) {
       setError(e.message || '辨識失敗');
     } finally {
       setBusy(false);
     }
-  }, [audioBlob, audioName, apiKey, provider, language]);
+  }, [audioBlob, audioName, apiKey, provider, language, outputLang]);
 
   const updateSegment = useCallback((idx, patch) => {
     setSegments((prev) => prev.map((s, i) => (i === idx ? { ...s, ...patch } : s)));
@@ -280,6 +284,16 @@ function App() {
             語言
             <select value={language} onChange={(e) => setLanguage(e.target.value)}>
               {LANGUAGES.map((l) => (
+                <option key={l.value} value={l.value}>
+                  {l.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            輸出
+            <select value={outputLang} onChange={(e) => setOutputLang(e.target.value)}>
+              {OUTPUT_LANGS.map((l) => (
                 <option key={l.value} value={l.value}>
                   {l.label}
                 </option>
