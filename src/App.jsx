@@ -107,7 +107,7 @@ function App() {
           setAudioName('audio.mp3');
           setProgress({ label: '音軌抽取完成，可以開始辨識', pct: 1 });
         } catch (e) {
-          setError(e.message || '音軌抽取失敗');
+          setError(e?.message || '音軌抽取失敗');
         } finally {
           setBusy(false);
         }
