@@ -63,7 +63,7 @@ check('時間軸字幕塊產生（3 段）', blockCount === 3, `blockCount=${blo
 const waveExists = await page.locator('.tl-wave').count();
 check('波形 canvas 存在', waveExists > 0);
 
-const segTexts = await page.locator('.tl-block span').allTextContents();
+const segTexts = await page.locator('.tl-block-text').allTextContents();
 check('字幕塊內容', segTexts.length === 3 && segTexts[0] === '第一句。' && segTexts[1] === '第二句。' && segTexts[2] === '第三句。', JSON.stringify(segTexts));
 
 await page.click('.tl-block >> nth=0');

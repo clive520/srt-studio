@@ -4,8 +4,14 @@ const rate = 16000;
 const seconds = 10;
 const n = rate * seconds;
 const samples = new Int16Array(n);
+// 大部分靜音，只有 3.0s~3.2s 一段 440Hz 音（讓測試能偵測波形是否位移）
+const toneStart = 3.0 * rate;
+const toneEnd = 3.2 * rate;
 for (let i = 0; i < n; i++) {
-  samples[i] = Math.round(Math.sin((2 * Math.PI * 440 * i) / rate) * 12000);
+  samples[i] =
+    i >= toneStart && i < toneEnd
+      ? Math.round(Math.sin((2 * Math.PI * 440 * i) / rate) * 12000)
+      : 0;
 }
 const buf = Buffer.alloc(44 + samples.length * 2);
 buf.write('RIFF', 0);

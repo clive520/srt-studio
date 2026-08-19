@@ -85,6 +85,7 @@ export default function Timeline({
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
 
+    // 畫布與內容同寬（contentWidth），直接以內容座標繪製，捲動時跟著捲動才不會與字幕塊錯位
     const startX = Math.max(0, Math.floor(scrollLeft));
     const endX = Math.min(Math.ceil(scrollLeft + w), Math.ceil(contentWidth));
     ctx.fillStyle = 'rgba(139, 147, 167, 0.75)';
@@ -93,12 +94,12 @@ export default function Timeline({
       const idx = Math.min(peaks.count - 1, Math.floor((x / contentWidth) * peaks.count));
       const y0 = mid - Math.min(1, Math.max(-1, peaks.max[idx])) * (h / 2);
       const y1 = mid - Math.min(1, Math.max(-1, peaks.min[idx])) * (h / 2);
-      ctx.fillRect(x - scrollLeft, y0, 1, Math.max(1, y1 - y0));
+      ctx.fillRect(x, y0, 1, Math.max(1, y1 - y0));
     }
 
-    // 播放頭
-    const px = currentTime * pxPerSec - scrollLeft;
-    if (px >= -1 && px <= w + 1) {
+    // 播放頭（內容座標）
+    const px = currentTime * pxPerSec;
+    if (px >= scrollLeft - 1 && px <= scrollLeft + w + 1) {
       ctx.fillStyle = '#ff5d6c';
       ctx.fillRect(px, 0, 2, h);
     }
@@ -113,7 +114,7 @@ export default function Timeline({
   const blockPointerDown = (e, i) => {
     const rect = e.currentTarget.getBoundingClientRect();
     const offX = e.clientX - rect.left;
-    const mode = offX < 8 ? 'start' : offX > rect.width - 8 ? 'end' : 'select';
+    const mode = offX < 10 ? 'start' : offX > rect.width - 10 ? 'end' : 'select';
     if (mode === 'select') {
       onSelect(i);
       return;
@@ -165,6 +166,7 @@ export default function Timeline({
           <button className="icon-btn" title="放大" onClick={() => zoomBy(2)}>＋</button>
         </div>
         <span className="tl-time">{fmtTime(currentTime)} / {fmtTime(duration)}</span>
+        <span className="tl-hint">拖曳字幕塊左右邊緣調整時間</span>
       </div>
       <div
         className="tl-scroll"
@@ -197,9 +199,11 @@ export default function Timeline({
                 style={{ left: s.start * pxPerSec, width: Math.max((s.end - s.start) * pxPerSec, 14) }}
                 onClick={(e) => e.stopPropagation()}
                 onPointerDown={(e) => blockPointerDown(e, i)}
-                title={`${fmtTime(s.start)} → ${fmtTime(s.end)}\n${s.text}`}
+                title={`${fmtTime(s.start)} → ${fmtTime(s.end)}\n${s.text}\n拖曳左右邊緣調整時間`}
               >
-                <span>{s.text}</span>
+                <span className="tl-block-handle left" />
+                <span className="tl-block-text">{s.text}</span>
+                <span className="tl-block-handle right" />
               </div>
             ))}
           </div>
