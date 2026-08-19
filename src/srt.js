@@ -66,31 +66,70 @@ export function cleanSegments(segs) {
   return out;
 }
 
-export function buildSegmentsFromWords(words, { maxChars = 42 } = {}) {
+const SENTENCE_END = /[。！？!?；;…]$/;
+const CLAUSE_END = /[，,、：:]$/;
+
+/**
+ * 依人類說話節奏斷句：以「字詞之間的靜音間隔」為主要訊號（Whisper 的 word 時間戳不含標點，
+ * 所以靠語速與停頓判斷斷句位置），並用標點與最大字數補強。
+ *
+ * 規則（由強到弱）：
+ *  1. 字詞結尾是句末標點（。！？…；;）→ 斷
+ *  2. 下一詞前靜音 > hardPause 秒 → 斷（長停頓，句界）
+ *  3. 已累積 minChars 字且靜音 > softPause 秒 → 斷（短停頓，逗號級）
+ *  4. 超過 maxChars 字 → 強制切（防過長）
+ *  5. 剩餘太短的片段併入前一段，避免閃爍
+ */
+export function buildSegmentsFromWords(
+  words,
+  { maxChars = 42, hardPause = 0.55, softPause = 0.28, minChars = 12 } = {}
+) {
   const tokens = words.filter((w) => w.word && w.word.trim());
+  if (!tokens.length) return [];
+
   const segs = [];
   let buf = [];
   let bufStart = null;
 
   const flush = () => {
     if (!buf.length) return;
-    const joined = buf.map((w) => w.word).join('').replace(/\s+/g, ' ').trim();
-    if (joined) {
-      segs.push({ start: buf[0].start, end: buf[buf.length - 1].end, text: joined });
-    }
+    const text = buf.map((w) => w.word).join('').replace(/\s+/g, ' ').trim();
+    if (text) segs.push({ start: buf[0].start, end: buf[buf.length - 1].end, text });
     buf = [];
     bufStart = null;
   };
 
-  for (const w of tokens) {
+  for (let i = 0; i < tokens.length; i++) {
+    const w = tokens[i];
     if (bufStart === null) bufStart = w.start;
     buf.push(w);
+
     const lastChar = [...w.word.trim()].pop() || '';
+    const next = tokens[i + 1];
+    const gap = next ? next.start - w.end : 0;
     const charCount = buf.map((x) => x.word).join('').replace(/\s/g, '').length;
-    if ((ENDERS.has(lastChar) && charCount >= 2) || charCount >= maxChars) flush();
+
+    const punctBreak = SENTENCE_END.test(lastChar) || (CLAUSE_END.test(lastChar) && charCount >= 4);
+    const hardBreak = next !== undefined && gap > hardPause;
+    const softBreak = !hardBreak && charCount >= minChars && gap > softPause;
+    const maxBreak = charCount >= maxChars;
+
+    if (punctBreak || hardBreak || softBreak || maxBreak) flush();
   }
   flush();
-  return segs;
+
+  // 只把極短（<0.45s）的碎屑併入前一段，避免閃爍，但保留合理短句
+  const out = [];
+  for (const s of segs) {
+    const prev = out[out.length - 1];
+    if (prev && s.end - s.start < 0.45 && prev.end - prev.start < 8) {
+      prev.text = `${prev.text} ${s.text}`.trim();
+      prev.end = s.end;
+    } else {
+      out.push(s);
+    }
+  }
+  return out;
 }
 
 export function downloadSRT(segs) {
