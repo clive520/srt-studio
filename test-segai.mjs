@@ -8,11 +8,14 @@ const browser = await chromium.launch({ executablePath: EXE, headless: true, arg
 const page = await browser.newPage();
 page.on('pageerror', (e) => console.log('[pageerror]', e.message));
 
-// 轉錄 mock：6 個字詞。AI 分段 mock（chat/completions）：回傳段界 [2, 6]
+// 轉錄 mock：6 個字詞。AI 分段 mock（chat/completions）：
+//   第 1 次（轉錄後自動跑）回 [2,6]；第 2 次（按鈕手動重跑）回 [2,4,6]（三句各一段）
 let promptOk = false;
+let chatCalls = 0;
 await page.route('**/api.groq.com/**', (route) => {
   const u = route.request().url();
   if (u.includes('chat/completions')) {
+    chatCalls++;
     const body = route.request().postData() || '';
     const sent = JSON.parse(body).messages[0].content;
     promptOk = /1\. 第一句 \[0\.00-1\.00\]/.test(sent) && /6\. 。 \[3\.80-3\.85\]/.test(sent);
@@ -20,7 +23,7 @@ await page.route('**/api.groq.com/**', (route) => {
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify({
-        choices: [{ message: { content: '{"boundaries":[2,6]}' } }],
+        choices: [{ message: { content: chatCalls === 1 ? '{"boundaries":[2,6]}' : '{"boundaries":[2,4,6]}' } }],
       }),
     });
   } else {
@@ -57,20 +60,16 @@ await page.waitForFunction(() => {
   return b && !b.disabled;
 }, { timeout: 20000 });
 await page.click('.file-bar .btn.primary');
-await page.waitForSelector('.tl-block', { timeout: 20000 });
+// 轉錄完成後「AI 重新分段」應自動執行（不用再按按鈕）：
+// AI 回傳段界 [2,6] → 2 段：段1「第一句。」[0,1.05]、段2「第二句。第三句。」[1.4,3.85]
+await page.waitForFunction(() => document.querySelectorAll('.tl-block').length === 2, { timeout: 20000 });
 await page.waitForTimeout(1500);
 
-// 啟發式分段 3 段
+// 啟發式分段不會先出現又閃走；直接驗證自動 AI 分段的結果
 let blocks = await page.locator('.tl-block').count();
-check('轉錄後先有啟發式分段（3 段）', blocks === 3, `blocks=${blocks}`);
-
-// 點「AI 重新分段」：AI 回傳段界 [2,6] → 2 段：
-//   段1 = 字 1~2「第一句。」[0,1.05]，段2 = 字 3~6「第二句。第三句。」[1.4,3.85]
-await page.click('text=AI 重新分段');
-await page.waitForFunction(() => document.querySelectorAll('.tl-block').length === 2, { timeout: 15000 });
+check('轉錄後自動 AI 分段（不用手動按，2 段）', blocks === 2, `blocks=${blocks}`);
+check('自動 AI 分段共呼叫 1 次', chatCalls === 1, `chatCalls=${chatCalls}`);
 check('送給 AI 的逐字稿含編號與時間', promptOk, 'prompt ok');
-blocks = await page.locator('.tl-block').count();
-check('AI 分段後變成 2 段', blocks === 2, `blocks=${blocks}`);
 
 // 驗證段界與時間：段2 起點 = 第二句真實開始 1.4s（不是啟發式比例）
 await page.click('.tl-block >> nth=1');
@@ -79,9 +78,6 @@ const start1 = parseFloat(await page.locator('.main-edit-time input >> nth=0').i
 const text1 = await page.locator('.main-edit textarea').inputValue();
 check('段2 起點 = 第二句真實時間 1.4s', Math.abs(start1 - 1.4) < 0.05, `start=${start1}`);
 check('段2 文字 = 第二句。第三句。', text1 === '第二句。第三句。', `text=${text1}`);
-
-const notice = await page.locator('.banner.info').textContent().catch(() => '');
-check('顯示 AI 分段完成提示', /已依 AI 分段重建 2 段/.test(notice || ''), `notice=${notice}`);
 
 // 再次切分仍應可用逐字時間（words 有保留下來）
 await page.evaluate(() => {
@@ -95,6 +91,16 @@ blocks = await page.locator('.tl-block').count();
 check('AI 分段後仍可依逐字時間切分（3 段）', blocks === 3, `blocks=${blocks}`);
 const end0 = parseFloat(await page.locator('.main-edit-time input >> nth=1').inputValue());
 check('切點 = 句號字界 2.4s', Math.abs(end0 - 2.4) < 0.05, `end=${end0}`);
+
+// 按鈕仍可手動重跑（AI 回 [2,4,6] → 3 段：第一句。/第二句。/第三句。）
+await page.click('text=AI 重新分段');
+await page.waitForFunction(() => document.querySelectorAll('.tl-block').length === 3, { timeout: 15000 });
+blocks = await page.locator('.tl-block').count();
+check('按鈕手動重跑仍有效（3 段）', blocks === 3, `blocks=${blocks}`);
+await page.click('.tl-block >> nth=0');
+await page.waitForTimeout(200);
+const text0 = await page.locator('.main-edit textarea').inputValue();
+check('重跑後段1 文字 = 第一句。', text0 === '第一句。', `text=${text0}`);
 
 console.log('\n=== RESULT ===');
 const failed = results.filter((r) => !r.ok);

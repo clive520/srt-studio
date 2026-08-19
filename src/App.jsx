@@ -196,7 +196,23 @@ function App() {
         : result.segments;
       commitSegments(await convertSegments(cleanSegments(built), outputLang));
       setActiveIdx(0);
-      setProgress({ label: `辨識完成，共 ${built.length} 段`, pct: 1 });
+      // 自動第二次 AI 分段：依 AI 決定的段界重建（失敗則保留上面的啟發式結果）
+      if (result.words?.length >= 3) {
+        setProgress({ label: 'AI 正在重新分段…', pct: 0.6 });
+        try {
+          const boundaries = await segmentByAI(provider, { key: apiKey.trim(), words: result.words });
+          const rebuilt = buildSegmentsFromRanges(result.words, boundaries);
+          if (rebuilt.length < 2) throw new Error('AI 分段結果無法使用');
+          commitSegments(await convertSegments(cleanSegments(rebuilt), outputLang));
+          setActiveIdx(0);
+          setProgress({ label: `辨識完成，共 ${rebuilt.length} 段（AI 分段）`, pct: 1 });
+        } catch (e2) {
+          setError(`${e2.message || 'AI 分段失敗'}，已保留自動分段結果`);
+          setProgress({ label: `辨識完成，共 ${built.length} 段`, pct: 1 });
+        }
+      } else {
+        setProgress({ label: `辨識完成，共 ${built.length} 段`, pct: 1 });
+      }
     } catch (e) {
       setError(e.message || '辨識失敗');
     } finally {
