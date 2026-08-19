@@ -178,19 +178,35 @@ export async function segmentByAI(provider, { key, words }) {
 
   const cfg = SEG_CHAT[provider.id];
   if (!cfg) throw new Error(`不支援 ${provider.name} 的 AI 分段`);
-  const res = await fetch(cfg.url, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model: cfg.model,
-      messages: [{ role: 'user', content: segPrompt(tokens) }],
-      temperature: 0,
-    }),
-  });
-  if (!res.ok) throw await errFrom(res);
-  const data = await res.json();
-  const raw = data.choices?.[0]?.message?.content ?? '';
-  return parseBoundaries(raw);
+  // 分批送：單一請求若包含整份逐字稿，長音檔會超過模型的
+  // 輸入上限 / TPM 額度（413）。每批 ~1000 字詞（約 6K tokens）。
+  const CHUNK_WORDS = 1000;
+  const boundaries = [];
+  for (let i = 0; i < tokens.length; i += CHUNK_WORDS) {
+    const part = tokens.slice(i, i + CHUNK_WORDS);
+    const res = await fetch(cfg.url, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: cfg.model,
+        messages: [{ role: 'user', content: segPrompt(part) }],
+        temperature: 0,
+      }),
+    });
+    if (!res.ok) throw await errFrom(res);
+    const data = await res.json();
+    const raw = data.choices?.[0]?.message?.content ?? '';
+    const seen = new Set(boundaries);
+    for (const b of parseBoundaries(raw)) {
+      const g = i + b; // 批次內是 1-based 編號，換算回全域
+      if (g > 0 && g <= tokens.length && !seen.has(g)) {
+        seen.add(g);
+        boundaries.push(g);
+      }
+    }
+  }
+  if (!boundaries.length) throw new Error('AI 回傳的段界無法使用');
+  return boundaries;
 }
 
 export async function transcribe(provider, opts) {
