@@ -102,6 +102,7 @@ export default function Timeline({
   }, [peaks, pxPerSec, scrollLeft, contentWidth]);
 
   // 播放頭：用 rAF 每幀讀取即時時間，順暢移動 DOM 播放頭（避免隨 React 重繪而跳動）
+  // 播放頭接近右緣時自動捲動，讓使用者看得到後續的音軌與字幕
   useEffect(() => {
     const playhead = playheadRef.current;
     if (!playhead) return;
@@ -112,8 +113,17 @@ export default function Timeline({
       const t = getCurrentTime ? getCurrentTime() : currentTime;
       const px = t * pxPerSec;
       if (Math.abs(px - lastPx) < 0.5) return;
+      const prev = lastPx;
       lastPx = px;
       playhead.style.left = `${px}px`;
+      const sc = scrollRef.current;
+      if (sc && px > prev) {
+        const visW = sc.clientWidth;
+        const rightEdge = sc.scrollLeft + visW;
+        if (px > rightEdge - visW * 0.15) {
+          sc.scrollLeft = px - visW * 0.6;
+        }
+      }
     };
     draw();
     return () => cancelAnimationFrame(raf);

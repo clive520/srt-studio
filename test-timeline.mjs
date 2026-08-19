@@ -156,6 +156,31 @@ check(
   `distinct=${distinct} samples=[${samples.map((s) => s.toFixed(0)).join(',')}]`
 );
 
+// ---- 播放時自動捲動（音軌長時紅線不會消失在畫面外） ----
+await page.evaluate(() => {
+  const m = document.querySelector('audio, video');
+  m.muted = true;
+  m.currentTime = 2.2;
+  m.play();
+});
+await page.waitForTimeout(700);
+const follow = await page.evaluate(() => {
+  const sc = document.querySelector('.tl-scroll');
+  const ph = document.querySelector('.tl-playhead');
+  const sr = sc.getBoundingClientRect();
+  const pr = ph.getBoundingClientRect();
+  return {
+    scrollLeft: sc.scrollLeft,
+    inView: pr.left >= sr.left - 1 && pr.right <= sr.right + 1,
+  };
+});
+await page.evaluate(() => document.querySelector('audio, video').pause());
+check(
+  '播放時時間軸自動捲動，紅線保持可見',
+  follow.scrollLeft > 0 && follow.inView,
+  `scrollLeft=${follow.scrollLeft} inView=${follow.inView}`
+);
+
 check('無 JS 錯誤', errors.length === 0, errors.join(' | '));
 
 console.log('\n=== RESULT ===');
