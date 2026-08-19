@@ -15,7 +15,8 @@ export default function Timeline({
   pxPerSec,
   setPxPerSec,
   currentTime,
-  getCurrentTime,
+getCurrentTime,
+  getPlaying,
   activeIdx,
   onSeek,
   onSelect,
@@ -117,21 +118,23 @@ export default function Timeline({
       lastPx = px;
       playhead.style.left = `${px}px`;
       const sc = scrollRef.current;
-      if (sc && px > prev) {
+      if (sc && px > prev && (!getPlaying || getPlaying())) {
         const visW = sc.clientWidth;
-        const rightEdge = sc.scrollLeft + visW;
-        if (px > rightEdge - visW * 0.15) {
-          sc.scrollLeft = px - visW * 0.6;
+        const maxScroll = Math.max(0, sc.scrollWidth - visW);
+        // 紅線過半後停在畫面中央，改由音軌捲動；音軌捲到最末端後紅線才繼續走
+        const mid = sc.scrollLeft + visW * 0.5;
+        if (px > mid) {
+          sc.scrollLeft = Math.min(px - visW * 0.5, maxScroll);
         }
       }
     };
     draw();
     return () => cancelAnimationFrame(raf);
-  }, [getCurrentTime, currentTime, pxPerSec]);
+  }, [getCurrentTime, getPlaying, currentTime, pxPerSec]);
 
   const seekFromEvent = (e) => {
     const rect = e.currentTarget.getBoundingClientRect();
-    const x = e.clientX - rect.left + scrollRef.current.scrollLeft;
+    const x = e.clientX - rect.left;
     onSeek(Math.max(0, Math.min(x / pxPerSec, duration)));
   };
 

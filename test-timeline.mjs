@@ -142,6 +142,11 @@ await page.evaluate(() => {
   m.currentTime = 0;
   m.play();
 });
+// 等播放器真的開始走（muted 自動播放有啟動延遲），再取樣
+await page.waitForFunction(() => {
+  const m = document.querySelector('audio, video');
+  return !m.paused && m.currentTime > 0.05;
+}, { timeout: 5000 }).catch(() => {});
 const samples = [];
 for (let i = 0; i < 12; i++) {
   await page.waitForTimeout(60);
@@ -156,7 +161,7 @@ check(
   `distinct=${distinct} samples=[${samples.map((s) => s.toFixed(0)).join(',')}]`
 );
 
-// ---- 播放時自動捲動（音軌長時紅線不會消失在畫面外） ----
+// ---- 播放時自動捲動：紅線停在畫面中央，音軌在下方走（音軌捲到底前紅線不動） ----
 await page.evaluate(() => {
   const m = document.querySelector('audio, video');
   m.muted = true;
@@ -171,14 +176,69 @@ const follow = await page.evaluate(() => {
   const pr = ph.getBoundingClientRect();
   return {
     scrollLeft: sc.scrollLeft,
-    inView: pr.left >= sr.left - 1 && pr.right <= sr.right + 1,
+    atCenter: Math.abs(pr.left + pr.width / 2 - (sr.left + sr.width / 2)) < 30,
   };
 });
 await page.evaluate(() => document.querySelector('audio, video').pause());
 check(
-  '播放時時間軸自動捲動，紅線保持可見',
-  follow.scrollLeft > 0 && follow.inView,
-  `scrollLeft=${follow.scrollLeft} inView=${follow.inView}`
+  '播放時紅線停在畫面中央，音軌自動捲動',
+  follow.scrollLeft > 0 && follow.atCenter,
+  `scrollLeft=${follow.scrollLeft} atCenter=${follow.atCenter}`
+);
+
+// ---- 捲動後點擊波形定位（seek 需換算回內容座標，不可再誤加 scrollLeft） ----
+// 目前捲動停在上一段結束的位置，先把時間軸捲到 400。
+await page.evaluate(() => {
+  const m = document.querySelector('audio, video');
+  m.pause();
+  document.querySelector('.tl-scroll').scrollTo({ left: 400, behavior: 'auto' });
+});
+await page.waitForFunction(() => document.querySelector('.tl-scroll').scrollLeft === 400, { timeout: 5000 });
+const clickSeek = await page.evaluate(() => {
+  const sc = document.querySelector('.tl-scroll');
+  const wave = document.querySelector('.tl-wave');
+  const sr = sc.getBoundingClientRect();
+  const wr = wave.getBoundingClientRect();
+  const off = 100; // 在可見區左邊 100px 處點擊 → 內容座標應為 400 + 100 = 500
+  return { x: sr.left + off, y: wr.top + 30, off };
+});
+await page.mouse.click(clickSeek.x, clickSeek.y);
+await page.waitForTimeout(200);
+const seekPos = await page.evaluate(() => {
+  const sc = document.querySelector('.tl-scroll');
+  const ph = document.querySelector('.tl-playhead');
+  const sr = sc.getBoundingClientRect();
+  const pr = ph.getBoundingClientRect();
+  return { scrollLeft: sc.scrollLeft, viewportLeft: pr.left - sr.left };
+});
+check(
+  '捲動後點擊波形，紅線停在點擊的內容位置',
+  Math.abs(seekPos.viewportLeft - clickSeek.off) < 5,
+  `viewportLeft=${seekPos.viewportLeft.toFixed(1)} (期望 ${clickSeek.off}) scroll=${seekPos.scrollLeft}`
+);
+
+// ---- 暫停時點擊波形：紅線就定在點擊處，不會被自動捲動拉走 ----
+const beforeClick = await page.evaluate(() => {
+  const sc = document.querySelector('.tl-scroll');
+  const sr = sc.getBoundingClientRect();
+  const wave = document.querySelector('.tl-wave');
+  const wr = wave.getBoundingClientRect();
+  const off = sr.width * 0.8; // 點在畫面右邊 80% 處（紅線若被拉到中央就算失敗）
+  return { x: sr.left + off, y: wr.top + 30, off, scrollLeft: sc.scrollLeft };
+});
+await page.mouse.click(beforeClick.x, beforeClick.y);
+await page.waitForTimeout(200);
+const afterClick = await page.evaluate(() => {
+  const sc = document.querySelector('.tl-scroll');
+  const ph = document.querySelector('.tl-playhead');
+  const sr = sc.getBoundingClientRect();
+  const pr = ph.getBoundingClientRect();
+  return { scrollLeft: sc.scrollLeft, viewportLeft: pr.left - sr.left };
+});
+check(
+  '暫停時點擊波形，紅線定在點擊處且時間軸不捲動',
+  afterClick.scrollLeft === beforeClick.scrollLeft && Math.abs(afterClick.viewportLeft - beforeClick.off) < 5,
+  `viewportLeft=${afterClick.viewportLeft.toFixed(1)} (期望 ${beforeClick.off.toFixed(1)}) scroll=${afterClick.scrollLeft} (原 ${beforeClick.scrollLeft})`
 );
 
 check('無 JS 錯誤', errors.length === 0, errors.join(' | '));
