@@ -21,6 +21,7 @@ const LS = {
   outLang: 'srt-studio:outlang',
   segs: 'srt-studio:segs',
   zoom: 'srt-studio:zoom',
+  preview: 'srt-studio:preview',
 };
 
 function load(key, fallback) {
@@ -75,6 +76,7 @@ function App() {
   const [dragging, setDragging] = useState(false);
   const [pxPerSec, setPxPerSec] = useState(() => load(LS.zoom, 40));
   const [showHelp, setShowHelp] = useState(false);
+  const [previewCollapsed, setPreviewCollapsed] = useState(() => load(LS.preview, false));
 
   const mediaRef = useRef(null);
   const segsRef = useRef(segments);
@@ -90,6 +92,7 @@ function App() {
   useEffect(() => localStorage.setItem(LS.lang, JSON.stringify(language)), [language]);
   useEffect(() => localStorage.setItem(LS.outLang, JSON.stringify(outputLang)), [outputLang]);
   useEffect(() => localStorage.setItem(LS.zoom, JSON.stringify(pxPerSec)), [pxPerSec]);
+  useEffect(() => localStorage.setItem(LS.preview, JSON.stringify(previewCollapsed)), [previewCollapsed]);
   useEffect(() => {
     localStorage.setItem(LS.segs, JSON.stringify(segments));
   }, [segments]);
@@ -603,30 +606,51 @@ function App() {
           </div>
         ) : (
           <section className="workspace">
-            <div className="media-box">
-              {isVideo ? (
-                <video
-                  ref={mediaRef}
-                  src={fileUrl}
-                  controls
-                  preload="metadata"
-                  onTimeUpdate={handleTimeUpdate}
-                />
-              ) : (
-                <audio
-                  ref={mediaRef}
-                  src={fileUrl}
-                  controls
-                  preload="metadata"
-                  onTimeUpdate={handleTimeUpdate}
-                />
-              )}
-              <div className={`caption-preview ${currentText ? 'show' : ''}`}>
-                {currentText || '（播放時會在此即時顯示字幕）'}
+            <div className="stage">
+              <div className={`media-box ${previewCollapsed ? 'collapsed' : ''}`}>
+                <div className="media-head">
+                  <span className="media-head-title">🎬 預覽</span>
+                  <button
+                    className="icon-btn"
+                    title="收合預覽，專心編輯字幕"
+                    onClick={() => setPreviewCollapsed(true)}
+                  >
+                    ⏷
+                  </button>
+                </div>
+                {isVideo ? (
+                  <video
+                    ref={mediaRef}
+                    src={fileUrl}
+                    controls
+                    preload="metadata"
+                    onTimeUpdate={handleTimeUpdate}
+                  />
+                ) : (
+                  <audio
+                    ref={mediaRef}
+                    src={fileUrl}
+                    controls
+                    preload="metadata"
+                    onTimeUpdate={handleTimeUpdate}
+                  />
+                )}
+                <div className={`caption-preview ${currentText ? 'show' : ''}`}>
+                  {currentText || '（播放時會在此即時顯示字幕）'}
+                </div>
               </div>
+              {previewCollapsed && (
+                <button
+                  className="btn small restore-preview"
+                  onClick={() => setPreviewCollapsed(false)}
+                >
+                  ▶ 顯示預覽
+                </button>
+              )}
             </div>
 
-            <div className="file-bar">
+            <div className="right-col">
+              <div className="file-bar">
               <span className="file-name" title={fileName}>
                 {fileName}
               </span>
@@ -709,6 +733,7 @@ function App() {
               onSplit={splitSegment}
               onPlay={playSegment}
             />
+            </div>
           </section>
         )}
       </main>

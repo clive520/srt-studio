@@ -29,6 +29,7 @@ export default function Timeline({
   const [peaks, setPeaks] = useState(null);
   const [scrollLeft, setScrollLeft] = useState(0);
   const dragRef = useRef(null);
+  const suppressScrollRef = useRef(false);
 
   // 解碼音檔並計算峰值
   useEffect(() => {
@@ -115,6 +116,8 @@ export default function Timeline({
     const rect = e.currentTarget.getBoundingClientRect();
     const offX = e.clientX - rect.left;
     const mode = offX < 10 ? 'start' : offX > rect.width - 10 ? 'end' : 'select';
+    // 用滑鼠點選/拖曳字幕塊時不自動捲動，避免選取後位置位移干擾接下來的拖曳
+    suppressScrollRef.current = true;
     if (mode === 'select') {
       onSelect(i);
       return;
@@ -149,11 +152,20 @@ export default function Timeline({
     setPxPerSec((p) => Math.max(8, Math.min(400, Math.round(p * factor))));
   };
 
-  // 選中段自動捲入可見範圍
+  // 選中段自動捲入可見範圍（僅鍵盤/面板選取時；滑鼠點選已可見，不捲以免位移）
   useEffect(() => {
     if (activeIdx < 0) return;
+    if (suppressScrollRef.current) {
+      suppressScrollRef.current = false;
+      return;
+    }
     const el = blocksRef.current?.querySelector(`[data-index="${activeIdx}"]`);
-    el?.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
+    if (!el) return;
+    const sc = scrollRef.current;
+    const er = el.getBoundingClientRect();
+    const sr = sc.getBoundingClientRect();
+    const out = er.left < sr.left || er.right > sr.right;
+    if (out) el.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   }, [activeIdx]);
 
   return (

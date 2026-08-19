@@ -202,15 +202,50 @@ body {
 
 /* ---------- Workspace ---------- */
 .workspace {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: minmax(300px, 1fr) 2fr;
   gap: 14px;
+  align-items: start;
 }
 
 .stage {
+  position: sticky;
+  top: 16px;
   display: flex;
   flex-direction: column;
   gap: 12px;
+  min-width: 0;
+}
+
+.right-col {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+
+.media-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  font-size: 13px;
+  color: var(--muted);
+  background: var(--bg-3);
+  border-bottom: 1px solid var(--line);
+}
+
+.media-head-title {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.media-box.collapsed {
+  display: none;
+}
+
+.restore-preview {
+  align-self: flex-start;
 }
 
 .media-box {
@@ -476,6 +511,10 @@ footer {
 @media (max-width: 900px) {
   .workspace {
     grid-template-columns: 1fr;
+  }
+
+  .stage {
+    position: static;
   }
 
   .settings .key-label {

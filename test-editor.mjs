@@ -66,6 +66,16 @@ check('波形 canvas 存在', waveExists > 0);
 const segTexts = await page.locator('.tl-block-text').allTextContents();
 check('字幕塊內容', segTexts.length === 3 && segTexts[0] === '第一句。' && segTexts[1] === '第二句。' && segTexts[2] === '第三句。', JSON.stringify(segTexts));
 
+const mbBefore = await page.locator('.media-box').isVisible();
+await page.click('.media-head .icon-btn');
+await page.waitForTimeout(200);
+const mbHidden = !(await page.locator('.media-box').isVisible());
+const restoreVisible = await page.locator('.restore-preview').isVisible();
+await page.click('.restore-preview');
+await page.waitForTimeout(200);
+const mbAfter = await page.locator('.media-box').isVisible();
+check('預覽可收合/展開', mbBefore && mbHidden && restoreVisible && mbAfter, `before=${mbBefore} hidden=${mbHidden} restore=${restoreVisible} after=${mbAfter}`);
+
 await page.click('.tl-block >> nth=0');
 await page.waitForTimeout(200);
 const editText = await page.locator('.main-edit textarea').inputValue().catch(() => '');
