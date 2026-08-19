@@ -58,6 +58,8 @@ function App() {
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState(null);
   const [error, setError] = useState(null);
+  const [notice, setNotice] = useState(null);
+  const noticeTimer = useRef(null);
 
   const {
     state: segments,
@@ -260,24 +262,49 @@ function App() {
     [commitSegments]
   );
 
+  const showNotice = useCallback((msg) => {
+    setNotice(msg);
+    clearTimeout(noticeTimer.current);
+    noticeTimer.current = setTimeout(() => setNotice(null), 2500);
+  }, []);
+
   const splitSegment = useCallback(
     (idx, caret) => {
+      const seg = segsRef.current[idx];
+      if (!seg) return;
+      const text = seg.text;
+      let sc = Math.max(0, Math.min(caret ?? -1, text.length));
+      let t1 = text.slice(0, sc).trim();
+      let t2 = text.slice(sc).trim();
+      let fallback = false;
+      if (!t1 || !t2) {
+        const punct = Math.max(
+          text.lastIndexOf('。'),
+          text.lastIndexOf('！'),
+          text.lastIndexOf('？'),
+          text.lastIndexOf('.'),
+          text.lastIndexOf('!'),
+          text.lastIndexOf('?')
+        );
+        sc = punct > 0 ? punct + 1 : Math.floor(text.length / 2);
+        t1 = text.slice(0, sc).trim();
+        t2 = text.slice(sc).trim();
+        fallback = true;
+        if (!t1 || !t2) {
+          setError('無法切分：文字為空或只有一個字');
+          return;
+        }
+      }
+      const splitTime = seg.start + (seg.end - seg.start) * (sc / text.length);
       commitSegments((prev) => {
-        const seg = prev[idx];
-        if (!seg) return prev;
-        const text = seg.text;
-        const c = Math.max(0, Math.min(caret, text.length));
-        const t1 = text.slice(0, c).trim();
-        const t2 = text.slice(c).trim();
-        if (!t1 || !t2 || c === 0 || c === text.length) return prev;
-        const ratio = c / text.length;
-        const splitTime = seg.start + (seg.end - seg.start) * ratio;
+        if (!prev[idx]) return prev;
         const next = [...prev];
         next.splice(idx, 1, { ...seg, text: t1 }, { start: splitTime, end: seg.end, text: t2 });
         return next;
       });
+      showNotice(fallback ? '已切分（游標在文字邊界，自動改在句點後切）' : '已切分為 2 段');
     },
-    [commitSegments]
+    [commitSegments, showNotice]
   );
 
   const fixTimeline = useCallback(() => {
@@ -536,6 +563,13 @@ function App() {
         <div className="banner error">
           <span>⚠️ {error}</span>
           <button onClick={() => setError(null)}>×</button>
+        </div>
+      )}
+
+      {notice && (
+        <div className="banner info">
+          <span>✓ {notice}</span>
+          <button onClick={() => setNotice(null)}>×</button>
         </div>
       )}
 

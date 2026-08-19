@@ -18,9 +18,15 @@ export default function EditPanel({
   onPlay,
 }) {
   const textRef = useRef(null);
+  const caretRef = useRef(null);
   const s = activeIdx >= 0 ? segments[activeIdx] : null;
   const ctxPrev = activeIdx > 0 ? segments.slice(Math.max(0, activeIdx - 2), activeIdx).reverse() : [];
   const ctxNext = segments.slice(activeIdx + 1, activeIdx + 3);
+
+  const trackCaret = () => {
+    const el = textRef.current;
+    if (el) caretRef.current = el.selectionStart;
+  };
 
   if (!s) {
     return (
@@ -32,7 +38,8 @@ export default function EditPanel({
 
   const handleSplit = () => {
     const el = textRef.current;
-    const caret = el?.selectionStart ?? Math.floor(s.text.length / 2);
+    const live = el && document.activeElement === el ? el.selectionStart : null;
+    const caret = live ?? caretRef.current ?? Math.floor(s.text.length / 2);
     onSplit(activeIdx, caret);
   };
 
@@ -88,6 +95,10 @@ export default function EditPanel({
           rows="3"
           value={s.text}
           onChange={(e) => onUpdate(activeIdx, { text: e.target.value })}
+          onFocus={trackCaret}
+          onSelect={trackCaret}
+          onMouseUp={trackCaret}
+          onKeyUp={trackCaret}
           placeholder="在此修改字幕文字…"
         />
         <div className="main-edit-actions">

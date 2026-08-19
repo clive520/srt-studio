@@ -145,6 +145,11 @@ body {
   border: 1px solid rgba(255, 93, 108, 0.4);
 }
 
+.banner.info {
+  background: rgba(53, 201, 142, 0.12);
+  border: 1px solid rgba(53, 201, 142, 0.45);
+}
+
 .banner button {
   background: none;
   border: none;
