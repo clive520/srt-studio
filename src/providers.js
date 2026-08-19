@@ -122,7 +122,7 @@ async function transcribeAssemblyAI(provider, { blob, key, language, onProgress 
 }
 
 const SEG_CHAT = {
-  groq: { url: 'https://api.groq.com/openai/v1/chat/completions', model: 'llama-3.3-70b-versatile' },
+  groq: { url: 'https://api.groq.com/openai/v1/chat/completions', model: 'openai/gpt-oss-120b' },
   openai: { url: 'https://api.openai.com/v1/chat/completions', model: 'gpt-4o-mini' },
 };
 
