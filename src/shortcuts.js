@@ -1,0 +1,15 @@
+export const SHORTCUTS = [
+  { keys: ['Space'], desc: '播放 / 暫停' },
+  { keys: ['←', '→'], desc: '時間往後 / 往前 0.5 秒' },
+  { keys: ['↑', '↓'], desc: '選上一段 / 下一段字幕' },
+  { keys: ['Enter'], desc: '播放目前所選段' },
+  { keys: ['Del', 'Backspace'], desc: '刪除所選段' },
+  { keys: ['M'], desc: '與下一段合併' },
+  { keys: ['Shift+M'], desc: '與上一段合併' },
+  { keys: ['S'], desc: '在游標處切分（在文字框內按）' },
+  { keys: ['[', ']'], desc: '所選段起點時間 -0.1 / +0.1 秒' },
+  { keys: ['{', '}'], desc: '所選段終點時間 -0.1 / +0.1 秒' },
+  { keys: ['Ctrl+Z', 'Ctrl+Shift+Z / Ctrl+Y'], desc: '復原 / 重做' },
+  { keys: ['?'], desc: '顯示 / 隱藏本說明' },
+  { keys: ['Esc'], desc: '關閉本說明' },
+];

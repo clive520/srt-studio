@@ -9,6 +9,10 @@ import {
 } from './srt.js';
 import { extractAudio, isVideoFile } from './audio.js';
 import { convertSegments, OUTPUT_LANGS } from './lang.js';
+import { useHistory } from './useHistory.js';
+import Timeline from './Timeline.jsx';
+import EditPanel from './EditPanel.jsx';
+import { SHORTCUTS } from './shortcuts.js';
 
 const LS = {
   provider: 'srt-studio:provider',
@@ -16,6 +20,7 @@ const LS = {
   lang: 'srt-studio:lang',
   outLang: 'srt-studio:outlang',
   segs: 'srt-studio:segs',
+  zoom: 'srt-studio:zoom',
 };
 
 function load(key, fallback) {
@@ -25,6 +30,14 @@ function load(key, fallback) {
   } catch {
     return fallback;
   }
+}
+
+function isTypingTarget(e) {
+  const t = e.target;
+  return (
+    t &&
+    (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)
+  );
 }
 
 function App() {
@@ -40,18 +53,28 @@ function App() {
 
   const [audioBlob, setAudioBlob] = useState(null);
   const [audioName, setAudioName] = useState('');
+  const [duration, setDuration] = useState(0);
 
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState(null);
   const [error, setError] = useState(null);
 
-  const [segments, setSegments] = useState(() => load(LS.segs, []));
+  const {
+    state: segments,
+    setState: setSegmentsRaw,
+    commit: commitSegments,
+    snapshot: snapshotSegments,
+    undo,
+    redo,
+  } = useHistory(() => load(LS.segs, []));
+
   const [activeIdx, setActiveIdx] = useState(-1);
+  const [playIdx, setPlayIdx] = useState(-1);
   const [dragging, setDragging] = useState(false);
+  const [pxPerSec, setPxPerSec] = useState(() => load(LS.zoom, 40));
+  const [showHelp, setShowHelp] = useState(false);
 
   const mediaRef = useRef(null);
-  const listRef = useRef(null);
-  const rowRefs = useRef([]);
   const segsRef = useRef(segments);
   segsRef.current = segments;
 
@@ -64,15 +87,19 @@ function App() {
   useEffect(() => localStorage.setItem(LS.key, JSON.stringify(apiKey)), [apiKey]);
   useEffect(() => localStorage.setItem(LS.lang, JSON.stringify(language)), [language]);
   useEffect(() => localStorage.setItem(LS.outLang, JSON.stringify(outputLang)), [outputLang]);
+  useEffect(() => localStorage.setItem(LS.zoom, JSON.stringify(pxPerSec)), [pxPerSec]);
   useEffect(() => {
     localStorage.setItem(LS.segs, JSON.stringify(segments));
   }, [segments]);
 
+  // activeIdx 超出範圍時收斂
   useEffect(() => {
-    if (activeIdx >= 0) {
-      rowRefs.current[activeIdx]?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    if (segments.length && activeIdx >= segments.length) {
+      setActiveIdx(segments.length - 1);
+    } else if (!segments.length) {
+      setActiveIdx(-1);
     }
-  }, [activeIdx]);
+  }, [segments.length, activeIdx]);
 
   useEffect(() => {
     return () => {
@@ -81,11 +108,13 @@ function App() {
   }, [fileUrl]);
 
   const resetMedia = useCallback(() => {
-    setSegments([]);
+    commitSegments([]);
     setActiveIdx(-1);
+    setPlayIdx(-1);
     setAudioBlob(null);
     setAudioName('');
-  }, []);
+    setDuration(0);
+  }, [commitSegments]);
 
   const handleFile = useCallback(
     async (f) => {
@@ -144,8 +173,7 @@ function App() {
     }
     setError(null);
     setBusy(true);
-    const pct = { label: '正在辨識…', pct: 0.2 };
-    setProgress(pct);
+    setProgress({ label: '正在辨識…', pct: 0.2 });
     try {
       const result = await transcribe(provider, {
         blob: audioBlob,
@@ -158,65 +186,110 @@ function App() {
       const built = result.words?.length
         ? buildSegmentsFromWords(result.words)
         : result.segments;
-      setSegments(await convertSegments(cleanSegments(built), outputLang));
+      commitSegments(await convertSegments(cleanSegments(built), outputLang));
+      setActiveIdx(0);
       setProgress({ label: `辨識完成，共 ${built.length} 段`, pct: 1 });
     } catch (e) {
       setError(e.message || '辨識失敗');
     } finally {
       setBusy(false);
     }
-  }, [audioBlob, audioName, apiKey, provider, language, outputLang]);
+  }, [audioBlob, audioName, apiKey, provider, language, outputLang, commitSegments]);
 
-  const updateSegment = useCallback((idx, patch) => {
-    setSegments((prev) => prev.map((s, i) => (i === idx ? { ...s, ...patch } : s)));
-  }, []);
+  const updateSegment = useCallback(
+    (idx, patch) => {
+      commitSegments((prev) => prev.map((s, i) => (i === idx ? { ...s, ...patch } : s)));
+    },
+    [commitSegments]
+  );
 
-  const addSegment = useCallback((idx) => {
-    setSegments((prev) => {
-      const base = prev[idx] || { start: 0, end: 1, text: '' };
-      const prevEnd = idx >= 0 ? prev[idx]?.start ?? 0 : 0;
-      const next = [...prev];
-      next.splice(idx + 1, 0, {
-        start: prevEnd,
-        end: Math.max(prevEnd + 0.5, base.start),
-        text: '',
+  const deleteSegment = useCallback(
+    (idx) => {
+      commitSegments((prev) => prev.filter((_, i) => i !== idx));
+      setActiveIdx((a) => (a === idx ? Math.max(0, idx - 1) : a));
+    },
+    [commitSegments]
+  );
+
+  const moveSegment = useCallback(
+    (idx, dir) => {
+      commitSegments((prev) => {
+        const next = [...prev];
+        const j = idx + dir;
+        if (j < 0 || j >= next.length) return prev;
+        [next[idx], next[j]] = [next[j], next[idx]];
+        return next;
       });
-      return next;
-    });
-  }, []);
+      setActiveIdx(idx + dir);
+    },
+    [commitSegments]
+  );
 
-  const deleteSegment = useCallback((idx) => {
-    setSegments((prev) => prev.filter((_, i) => i !== idx));
-  }, []);
-
-  const moveSegment = useCallback((idx, dir) => {
-    setSegments((prev) => {
-      const next = [...prev];
-      const j = idx + dir;
-      if (j < 0 || j >= next.length) return prev;
-      [next[idx], next[j]] = [next[j], next[idx]];
-      return next;
-    });
-  }, []);
-
-  const mergeNext = useCallback((idx) => {
-    setSegments((prev) => {
-      if (idx >= prev.length - 1) return prev;
-      const next = [...prev];
-      const a = next[idx];
-      const b = next[idx + 1];
-      next.splice(idx, 2, {
-        start: a.start,
-        end: b.end,
-        text: `${a.text}${a.text ? ' ' : ''}${b.text}`.trim(),
+  const mergeSegment = useCallback(
+    (idx, dir) => {
+      commitSegments((prev) => {
+        if (prev.length < 2) return prev;
+        if (dir === -1) {
+          if (idx <= 0) return prev;
+          const a = prev[idx - 1];
+          const b = prev[idx];
+          const next = [...prev];
+          next.splice(idx - 1, 2, {
+            start: a.start,
+            end: b.end,
+            text: `${a.text}${a.text ? ' ' : ''}${b.text}`.trim(),
+          });
+          return next;
+        }
+        if (dir === 1) {
+          if (idx >= prev.length - 1) return prev;
+          const a = prev[idx];
+          const b = prev[idx + 1];
+          const next = [...prev];
+          next.splice(idx, 2, {
+            start: a.start,
+            end: b.end,
+            text: `${a.text}${a.text ? ' ' : ''}${b.text}`.trim(),
+          });
+          return next;
+        }
+        return prev;
       });
-      return next;
-    });
-  }, []);
+      setActiveIdx(dir === -1 ? idx - 1 : idx);
+    },
+    [commitSegments]
+  );
+
+  const splitSegment = useCallback(
+    (idx, caret) => {
+      commitSegments((prev) => {
+        const seg = prev[idx];
+        if (!seg) return prev;
+        const text = seg.text;
+        const c = Math.max(0, Math.min(caret, text.length));
+        const t1 = text.slice(0, c).trim();
+        const t2 = text.slice(c).trim();
+        if (!t1 || !t2 || c === 0 || c === text.length) return prev;
+        const ratio = c / text.length;
+        const splitTime = seg.start + (seg.end - seg.start) * ratio;
+        const next = [...prev];
+        next.splice(idx, 1, { ...seg, text: t1 }, { start: splitTime, end: seg.end, text: t2 });
+        return next;
+      });
+    },
+    [commitSegments]
+  );
 
   const fixTimeline = useCallback(() => {
-    setSegments((prev) => cleanSegments(prev));
-  }, []);
+    commitSegments((prev) => cleanSegments(prev));
+  }, [commitSegments]);
+
+  const resizeLive = useCallback(
+    (idx, patch) => {
+      setSegmentsRaw((prev) => prev.map((s, i) => (i === idx ? { ...s, ...patch } : s)));
+    },
+    [setSegmentsRaw]
+  );
 
   const handleTimeUpdate = useCallback(() => {
     const t = mediaRef.current?.currentTime ?? 0;
@@ -228,7 +301,7 @@ function App() {
         break;
       }
     }
-    setActiveIdx(idx);
+    setPlayIdx(idx);
   }, []);
 
   const seekTo = useCallback((t) => {
@@ -239,6 +312,52 @@ function App() {
     }
   }, []);
 
+  const seekOnly = useCallback((t) => {
+    const m = mediaRef.current;
+    if (m) m.currentTime = t;
+  }, []);
+
+  const togglePlay = useCallback(() => {
+    const m = mediaRef.current;
+    if (!m) return;
+    if (m.paused) m.play().catch(() => {});
+    else m.pause();
+  }, []);
+
+  const playSegment = useCallback(
+    (idx) => {
+      const s = segsRef.current[idx];
+      if (!s) return;
+      const m = mediaRef.current;
+      if (m) {
+        m.currentTime = s.start;
+        m.play().catch(() => {});
+      }
+    },
+    []
+  );
+
+  const selectRel = useCallback(
+    (d) => {
+      setActiveIdx((a) => {
+        const n = a + d;
+        return n < 0 || n >= segsRef.current.length ? a : n;
+      });
+    },
+    []
+  );
+
+  const nudgeTime = useCallback(
+    (key, key2, delta) => {
+      const a = activeIdx;
+      const s = segsRef.current[a];
+      if (!s) return;
+      if (key2 === 'start') updateSegment(a, { start: Math.max(0, Math.round((s.start + delta) * 100) / 100) });
+      else updateSegment(a, { end: Math.max(s.start + 0.1, Math.round((s.end + delta) * 100) / 100) });
+    },
+    [activeIdx, updateSegment]
+  );
+
   const onFileInput = useCallback(
     (e) => {
       const f = e.target.files?.[0];
@@ -248,7 +367,113 @@ function App() {
     [handleFile]
   );
 
-  const currentText = activeIdx >= 0 ? segments[activeIdx]?.text : '';
+  // 鍵盤快捷鍵
+  useEffect(() => {
+    const onKey = (e) => {
+      const mod = e.ctrlKey || e.metaKey;
+      if (mod && (e.key === 'z' || e.key === 'Z')) {
+        e.preventDefault();
+        if (e.shiftKey) redo();
+        else undo();
+        return;
+      }
+      if (mod && (e.key === 'y' || e.key === 'Y')) {
+        e.preventDefault();
+        redo();
+        return;
+      }
+      if (e.key === '?') {
+        e.preventDefault();
+        setShowHelp((h) => !h);
+        return;
+      }
+      if (e.key === 'Escape') {
+        setShowHelp(false);
+        return;
+      }
+      const typing = isTypingTarget(e);
+      if (typing) {
+        // 文字框內僅支援 S（切分）
+        if ((e.key === 's' || e.key === 'S') && activeIdx >= 0) {
+          e.preventDefault();
+          const caret = document.activeElement?.selectionStart ?? 0;
+          splitSegment(activeIdx, caret);
+        }
+        return;
+      }
+      if (!segments.length) return;
+      switch (e.key) {
+        case ' ':
+          e.preventDefault();
+          togglePlay();
+          break;
+        case 'ArrowRight':
+          e.preventDefault();
+          seekOnly(mediaRef.current.currentTime + 0.5);
+          break;
+        case 'ArrowLeft':
+          e.preventDefault();
+          seekOnly(mediaRef.current.currentTime - 0.5);
+          break;
+        case 'ArrowDown':
+          e.preventDefault();
+          selectRel(1);
+          break;
+        case 'ArrowUp':
+          e.preventDefault();
+          selectRel(-1);
+          break;
+        case 'Enter':
+          e.preventDefault();
+          if (activeIdx >= 0) playSegment(activeIdx);
+          break;
+        case 'Delete':
+        case 'Backspace':
+          e.preventDefault();
+          if (activeIdx >= 0) deleteSegment(activeIdx);
+          break;
+        case 'm':
+        case 'M':
+          if (activeIdx >= 0) mergeSegment(activeIdx, e.shiftKey ? -1 : 1);
+          break;
+        case '[':
+          e.preventDefault();
+          nudgeTime('start', 'start', -0.1);
+          break;
+        case ']':
+          e.preventDefault();
+          nudgeTime('start', 'start', 0.1);
+          break;
+        case '{':
+          e.preventDefault();
+          nudgeTime('end', 'end', -0.1);
+          break;
+        case '}':
+          e.preventDefault();
+          nudgeTime('end', 'end', 0.1);
+          break;
+        default:
+          break;
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [
+    activeIdx,
+    segments.length,
+    splitSegment,
+    deleteSegment,
+    mergeSegment,
+    nudgeTime,
+    selectRel,
+    togglePlay,
+    playSegment,
+    seekOnly,
+    undo,
+    redo,
+  ]);
+
+  const currentText = playIdx >= 0 ? segments[playIdx]?.text : '';
 
   return (
     <div className="app">
@@ -344,145 +569,143 @@ function App() {
           </div>
         ) : (
           <section className="workspace">
-            <div className="stage">
-              <div className="media-box">
-                {isVideo ? (
-                  <video
-                    ref={mediaRef}
-                    src={fileUrl}
-                    controls
-                    preload="metadata"
-                    onTimeUpdate={handleTimeUpdate}
-                  />
-                ) : (
-                  <audio
-                    ref={mediaRef}
-                    src={fileUrl}
-                    controls
-                    preload="metadata"
-                    onTimeUpdate={handleTimeUpdate}
-                  />
-                )}
-                <div className={`caption-preview ${currentText ? 'show' : ''}`}>
-                  {currentText || '（播放時會在此即時顯示字幕）'}
-                </div>
-              </div>
-
-              <div className="file-bar">
-                <span className="file-name" title={fileName}>
-                  {fileName}
-                </span>
-                <button
-                  className="btn primary"
-                  disabled={busy || !audioBlob}
-                  onClick={handleTranscribe}
-                >
-                  {busy ? '處理中…' : segments.length ? '重新辨識' : '開始辨識'}
-                </button>
-                <button className="btn" onClick={() => { setFile(null); setFileUrl(null); }}>
-                  更換檔案
-                </button>
-              </div>
-
-              {busy && progress && (
-                <div className="progress">
-                  <div className="progress-bar">
-                    <div
-                      className="progress-fill"
-                      style={{ width: `${Math.round((progress.pct ?? 0) * 100)}%` }}
-                    />
-                  </div>
-                  <span>{progress.label}</span>
-                </div>
-              )}
-
-              <div className="toolbar">
-                <button className="btn" onClick={() => downloadSRT(segments)} disabled={!segments.length}>
-                  ⬇ 下載 .srt
-                </button>
-                <button
-                  className="btn"
-                  onClick={() => navigator.clipboard.writeText(toSRT(segments))}
-                  disabled={!segments.length}
-                >
-                  📋 複製
-                </button>
-                <button className="btn" onClick={fixTimeline} disabled={!segments.length}>
-                  🔧 修正時間軸
-                </button>
-                <button
-                  className="btn danger"
-                  onClick={() => setSegments([])}
-                  disabled={!segments.length}
-                >
-                  🗑 清空字幕
-                </button>
-                <span className="count">
-                  {segments.length} 段・共 {fmtTime(segments.reduce((a, s) => a + (s.end - s.start), 0))} 秒
-                </span>
-              </div>
-            </div>
-
-            <div className="list-pane">
-              <div className="list-head">
-                <span>字幕編輯</span>
-                <button className="btn small" onClick={() => addSegment(segments.length - 1)} disabled={!segments.length}>
-                  ＋ 新增
-                </button>
-              </div>
-              {!segments.length ? (
-                <p className="empty">
-                  辨識完成後，字幕會列在這裡。點擊任一列可跳到該時間。
-                </p>
+            <div className="media-box">
+              {isVideo ? (
+                <video
+                  ref={mediaRef}
+                  src={fileUrl}
+                  controls
+                  preload="metadata"
+                  onTimeUpdate={handleTimeUpdate}
+                />
               ) : (
-                <div className="seg-list" ref={listRef}>
-                  {segments.map((s, i) => (
-                    <div
-                      key={i}
-                      ref={(el) => (rowRefs.current[i] = el)}
-                      className={`seg-row ${i === activeIdx ? 'active' : ''}`}
-                    >
-                      <div className="seg-time">
-                        <input
-                          type="number"
-                          min="0"
-                          step="0.1"
-                          value={Math.round(s.start * 100) / 100}
-                          onChange={(e) => updateSegment(i, { start: +e.target.value || 0 })}
-                        />
-                        <span className="sep">→</span>
-                        <input
-                          type="number"
-                          min="0"
-                          step="0.1"
-                          value={Math.round(s.end * 100) / 100}
-                          onChange={(e) => updateSegment(i, { end: +e.target.value || 0 })}
-                        />
-                        <button className="icon-btn" title="跳到這個時間" onClick={() => seekTo(s.start)}>
-                          ▶
-                        </button>
-                      </div>
-                      <textarea
-                        rows="2"
-                        value={s.text}
-                        onChange={(e) => updateSegment(i, { text: e.target.value })}
-                        onFocus={() => seekTo(s.start)}
-                      />
-                      <div className="seg-actions">
-                        <button className="icon-btn" title="上移" onClick={() => moveSegment(i, -1)}>↑</button>
-                        <button className="icon-btn" title="下移" onClick={() => moveSegment(i, 1)}>↓</button>
-                        <button className="icon-btn" title="合併到下一段" onClick={() => mergeNext(i)}>⇄</button>
-                        <button className="icon-btn" title="下方新增" onClick={() => addSegment(i)}>＋</button>
-                        <button className="icon-btn danger" title="刪除" onClick={() => deleteSegment(i)}>✕</button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                <audio
+                  ref={mediaRef}
+                  src={fileUrl}
+                  controls
+                  preload="metadata"
+                  onTimeUpdate={handleTimeUpdate}
+                />
               )}
+              <div className={`caption-preview ${currentText ? 'show' : ''}`}>
+                {currentText || '（播放時會在此即時顯示字幕）'}
+              </div>
             </div>
+
+            <div className="file-bar">
+              <span className="file-name" title={fileName}>
+                {fileName}
+              </span>
+              <button className="btn primary" disabled={busy || !audioBlob} onClick={handleTranscribe}>
+                {busy ? '處理中…' : segments.length ? '重新辨識' : '開始辨識'}
+              </button>
+              <button className="btn" onClick={() => { setFile(null); setFileUrl(null); }}>
+                更換檔案
+              </button>
+            </div>
+
+            {busy && progress && (
+              <div className="progress">
+                <div className="progress-bar">
+                  <div
+                    className="progress-fill"
+                    style={{ width: `${Math.round((progress.pct ?? 0) * 100)}%` }}
+                  />
+                </div>
+                <span>{progress.label}</span>
+              </div>
+            )}
+
+            <div className="toolbar">
+              <button className="btn" onClick={() => downloadSRT(segments)} disabled={!segments.length}>
+                ⬇ 下載 .srt
+              </button>
+              <button
+                className="btn"
+                onClick={() => navigator.clipboard.writeText(toSRT(segments))}
+                disabled={!segments.length}
+              >
+                📋 複製
+              </button>
+              <button className="btn" onClick={fixTimeline} disabled={!segments.length}>
+                🔧 修正時間軸
+              </button>
+              <button className="btn" onClick={undo} disabled={!segments.length}>
+                ↩ 復原
+              </button>
+              <button className="btn" onClick={redo} disabled={!segments.length}>
+                ↪ 重做
+              </button>
+              <button className="btn" onClick={() => setShowHelp(true)}>
+                ? 快捷鍵
+              </button>
+              <button className="btn danger" onClick={() => commitSegments([])} disabled={!segments.length}>
+                🗑 清空字幕
+              </button>
+              <span className="count">
+                {segments.length} 段・{fmtTime(duration)}
+              </span>
+            </div>
+
+            <Timeline
+              audioBlob={audioBlob}
+              duration={duration}
+              segments={segments}
+              pxPerSec={pxPerSec}
+              setPxPerSec={setPxPerSec}
+              currentTime={mediaRef.current?.currentTime ?? 0}
+              activeIdx={activeIdx}
+              onSeek={seekOnly}
+              onSelect={setActiveIdx}
+              onResizeSegment={resizeLive}
+              onResizeStart={snapshotSegments}
+              onResizeEnd={() => {}}
+              onDurationChange={setDuration}
+            />
+
+            <EditPanel
+              segments={segments}
+              activeIdx={activeIdx}
+              onSelect={setActiveIdx}
+              onSeek={seekOnly}
+              onUpdate={updateSegment}
+              onDelete={deleteSegment}
+              onMove={moveSegment}
+              onMerge={mergeSegment}
+              onSplit={splitSegment}
+              onPlay={playSegment}
+            />
           </section>
         )}
       </main>
+
+      {showHelp && (
+        <div className="modal-overlay" onClick={() => setShowHelp(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-head">
+              <h2>⌨️ 鍵盤快捷鍵</h2>
+              <button className="icon-btn" onClick={() => setShowHelp(false)}>✕</button>
+            </div>
+            <table className="shortcut-table">
+              <tbody>
+                {SHORTCUTS.map((s, i) => (
+                  <tr key={i}>
+                    <td className="keys">
+                      {s.keys.map((k) => (
+                        <kbd key={k}>{k}</kbd>
+                      ))}
+                    </td>
+                    <td>{s.desc}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <p className="modal-hint">
+              提示：在時間軸上可直接拖曳字幕塊左右邊緣來調整起訖時間；按住邊緣拖曳即可。
+            </p>
+          </div>
+        </div>
+      )}
 
       <footer>
         Key 只存於你的瀏覽器（localStorage），語音直接送往你選擇的供應商，本站不會留存你的檔案與字幕。
