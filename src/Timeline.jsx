@@ -33,6 +33,7 @@ getCurrentTime,
   const [scrollLeft, setScrollLeft] = useState(0);
   const dragRef = useRef(null);
   const suppressScrollRef = useRef(false);
+  const lastPxRef = useRef(-1);
 
   // 解碼音檔並計算峰值
   useEffect(() => {
@@ -108,23 +109,27 @@ getCurrentTime,
     const playhead = playheadRef.current;
     if (!playhead) return;
     let raf;
-    let lastPx = -1;
     const draw = () => {
       raf = requestAnimationFrame(draw);
       const t = getCurrentTime ? getCurrentTime() : currentTime;
       const px = t * pxPerSec;
-      if (Math.abs(px - lastPx) < 0.5) return;
-      const prev = lastPx;
-      lastPx = px;
+      if (Math.abs(px - lastPxRef.current) < 0.5) return;
+      const prev = lastPxRef.current;
+      lastPxRef.current = px;
       playhead.style.left = `${px}px`;
       const sc = scrollRef.current;
-      if (sc && px > prev && (!getPlaying || getPlaying())) {
+      if (sc && (!getPlaying || getPlaying())) {
         const visW = sc.clientWidth;
         const maxScroll = Math.max(0, sc.scrollWidth - visW);
-        // 紅線過半後停在畫面中央，改由音軌捲動；音軌捲到最末端後紅線才繼續走
-        const mid = sc.scrollLeft + visW * 0.5;
-        if (px > mid) {
-          sc.scrollLeft = Math.min(px - visW * 0.5, maxScroll);
+        if (px > prev) {
+          // 向前播放：紅線過半後停在畫面中央，音軌捲動；音軌捲到末端後紅線才繼續走
+          const mid = sc.scrollLeft + visW * 0.5;
+          if (px > mid) {
+            sc.scrollLeft = Math.min(px - visW * 0.5, maxScroll);
+          }
+        } else if (px < prev) {
+          // 往回跳（重播／倒帶）：捲回讓紅線回到可見區中央，避免畫面還停在最後一段
+          sc.scrollLeft = Math.max(0, Math.min(px - visW * 0.5, maxScroll));
         }
       }
     };

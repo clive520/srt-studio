@@ -241,6 +241,31 @@ check(
   `viewportLeft=${afterClick.viewportLeft.toFixed(1)} (期望 ${beforeClick.off.toFixed(1)}) scroll=${afterClick.scrollLeft} (原 ${beforeClick.scrollLeft})`
 );
 
+// ---- 播完重播：畫面要回到最前面，紅線回到起點 ----
+// 模擬真實使用：播到自然結束（ended）後，再按空白鍵重播。
+await page.evaluate(() => {
+  const m = document.querySelector('audio, video');
+  m.muted = true;
+  m.pause();
+  m.currentTime = m.duration - 1.5;
+  m.play();
+});
+await page.waitForFunction(() => document.querySelector('audio, video').ended, { timeout: 10000 });
+const scrollAtEnd = await page.evaluate(() => document.querySelector('.tl-scroll').scrollLeft);
+await page.keyboard.press('Space'); // ended 狀態下 play() 會自動回到 0 重播
+await page.waitForTimeout(300);
+const replay = await page.evaluate(() => {
+  const sc = document.querySelector('.tl-scroll');
+  const m = document.querySelector('audio, video');
+  return { scrollLeft: sc.scrollLeft, time: m.currentTime };
+});
+await page.evaluate(() => document.querySelector('audio, video').pause());
+check(
+  '播完重播：畫面回到最前面，紅線跟著回到起點',
+  scrollAtEnd > 1000 && replay.scrollLeft < 50 && replay.time < 0.5,
+  `scrollAtEnd=${scrollAtEnd} scrollLeft=${replay.scrollLeft} time=${replay.time.toFixed(2)}`
+);
+
 check('無 JS 錯誤', errors.length === 0, errors.join(' | '));
 
 console.log('\n=== RESULT ===');
