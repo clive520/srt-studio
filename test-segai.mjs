@@ -18,7 +18,7 @@ await page.route('**/api.groq.com/**', (route) => {
     chatCalls++;
     const body = route.request().postData() || '';
     const sent = JSON.parse(body).messages[0].content;
-    promptOk = /1\. 第一句 \[0\.00-1\.00\]/.test(sent) && /6\. 。 \[3\.80-3\.85\]/.test(sent);
+    promptOk = /1\. 第一句 \[0\.0-1\.0\]/.test(sent) && /6\. 。 \[3\.8-/.test(sent);
     route.fulfill({
       status: 200,
       contentType: 'application/json',

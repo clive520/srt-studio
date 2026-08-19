@@ -122,12 +122,12 @@ async function transcribeAssemblyAI(provider, { blob, key, language, onProgress 
 }
 
 const SEG_CHAT = {
-  groq: { url: 'https://api.groq.com/openai/v1/chat/completions', model: 'openai/gpt-oss-120b' },
+  groq: { url: 'https://api.groq.com/openai/v1/chat/completions', model: 'groq/compound-mini' },
   openai: { url: 'https://api.openai.com/v1/chat/completions', model: 'gpt-4o-mini' },
 };
 
 function segPrompt(tokens) {
-  const list = tokens.map((w, i) => `${i + 1}. ${w.word} [${w.start.toFixed(2)}-${w.end.toFixed(2)}]`).join('\n');
+  const list = tokens.map((w, i) => `${i + 1}. ${w.word} [${w.start.toFixed(1)}-${w.end.toFixed(1)}]`).join('\n');
   return (
     '你是字幕分段專家。以下是語音辨識出的逐字稿，每個字詞附上編號與時間（秒）。' +
     '請把字詞分成適合字幕顯示的段落：以句意為界（句號、問號、驚嘆號結尾優先），' +
@@ -185,7 +185,6 @@ export async function segmentByAI(provider, { key, words }) {
       model: cfg.model,
       messages: [{ role: 'user', content: segPrompt(tokens) }],
       temperature: 0,
-      response_format: { type: 'json_object' },
     }),
   });
   if (!res.ok) throw await errFrom(res);
