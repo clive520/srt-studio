@@ -134,6 +134,28 @@ check(
   `toneAlpha=${align.toneAlpha} shiftedAlpha=${align.shiftedAlpha} scroll=${align.scrollLeft} inView=${align.inView}`
 );
 
+// ---- 播放頭順暢移動（rAF 驅動，不再跳格） ----
+await page.evaluate(() => {
+  document.querySelector('.tl-scroll').scrollTo({ left: 0, behavior: 'auto' });
+  const m = document.querySelector('audio, video');
+  m.muted = true;
+  m.currentTime = 0;
+  m.play();
+});
+const samples = [];
+for (let i = 0; i < 12; i++) {
+  await page.waitForTimeout(60);
+  samples.push(parseFloat(await page.evaluate(() => document.querySelector('.tl-playhead').style.left)));
+}
+await page.evaluate(() => document.querySelector('audio, video').pause());
+const distinct = new Set(samples.filter((v) => !Number.isNaN(v))).size;
+const advanced = samples[samples.length - 1] > samples[0];
+check(
+  '播放時播放頭順暢移動（多個不同位置，非跳格）',
+  distinct >= 6 && advanced,
+  `distinct=${distinct} samples=[${samples.map((s) => s.toFixed(0)).join(',')}]`
+);
+
 check('無 JS 錯誤', errors.length === 0, errors.join(' | '));
 
 console.log('\n=== RESULT ===');

@@ -15,6 +15,7 @@ export default function Timeline({
   pxPerSec,
   setPxPerSec,
   currentTime,
+  getCurrentTime,
   activeIdx,
   onSeek,
   onSelect,
@@ -26,6 +27,7 @@ export default function Timeline({
   const scrollRef = useRef(null);
   const canvasRef = useRef(null);
   const blocksRef = useRef(null);
+  const playheadRef = useRef(null);
   const [peaks, setPeaks] = useState(null);
   const [scrollLeft, setScrollLeft] = useState(0);
   const dragRef = useRef(null);
@@ -97,14 +99,25 @@ export default function Timeline({
       const y1 = mid - Math.min(1, Math.max(-1, peaks.min[idx])) * (h / 2);
       ctx.fillRect(x, y0, 1, Math.max(1, y1 - y0));
     }
+  }, [peaks, pxPerSec, scrollLeft, contentWidth]);
 
-    // 播放頭（內容座標）
-    const px = currentTime * pxPerSec;
-    if (px >= scrollLeft - 1 && px <= scrollLeft + w + 1) {
-      ctx.fillStyle = '#ff5d6c';
-      ctx.fillRect(px, 0, 2, h);
-    }
-  }, [peaks, pxPerSec, currentTime, scrollLeft, contentWidth]);
+  // 播放頭：用 rAF 每幀讀取即時時間，順暢移動 DOM 播放頭（避免隨 React 重繪而跳動）
+  useEffect(() => {
+    const playhead = playheadRef.current;
+    if (!playhead) return;
+    let raf;
+    let lastPx = -1;
+    const draw = () => {
+      raf = requestAnimationFrame(draw);
+      const t = getCurrentTime ? getCurrentTime() : currentTime;
+      const px = t * pxPerSec;
+      if (Math.abs(px - lastPx) < 0.5) return;
+      lastPx = px;
+      playhead.style.left = `${px}px`;
+    };
+    draw();
+    return () => cancelAnimationFrame(raf);
+  }, [getCurrentTime, currentTime, pxPerSec]);
 
   const seekFromEvent = (e) => {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -219,7 +232,7 @@ export default function Timeline({
               </div>
             ))}
           </div>
-          <div className="tl-playhead" style={{ left: currentTime * pxPerSec }} />
+          <div className="tl-playhead" ref={playheadRef} style={{ left: currentTime * pxPerSec }} />
         </div>
       </div>
     </div>

@@ -503,6 +503,8 @@ function App() {
     redo,
   ]);
 
+  const getLiveTime = useCallback(() => mediaRef.current?.currentTime ?? 0, []);
+
   const currentText = playIdx >= 0 ? segments[playIdx]?.text : '';
 
   return (
@@ -712,6 +714,7 @@ function App() {
               pxPerSec={pxPerSec}
               setPxPerSec={setPxPerSec}
               currentTime={mediaRef.current?.currentTime ?? 0}
+              getCurrentTime={getLiveTime}
               activeIdx={activeIdx}
               onSeek={seekOnly}
               onSelect={setActiveIdx}
