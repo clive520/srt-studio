@@ -35,7 +35,10 @@ export async function convertSegments(segs, mode) {
   if (!mode || mode === 'keep') return segs;
   const out = [];
   for (const s of segs) {
-    out.push({ ...s, text: await convertText(s.text, mode) });
+    const t = await convertText(s.text, mode);
+    const n = { ...s, text: t };
+    if (t !== s.text) n.words = undefined; // 文字真的被轉換過，逐字時間戳對應才失效
+    out.push(n);
   }
   return out;
 }

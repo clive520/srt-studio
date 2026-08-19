@@ -3,6 +3,8 @@ import { PROVIDERS, LANGUAGES, transcribe } from './providers.js';
 import {
   cleanSegments,
   buildSegmentsFromWords,
+  wordsToText,
+  splitWordsAt,
   toSRT,
   downloadSRT,
   fmtTime,
@@ -203,7 +205,14 @@ function App() {
 
   const updateSegment = useCallback(
     (idx, patch) => {
-      commitSegments((prev) => prev.map((s, i) => (i === idx ? { ...s, ...patch } : s)));
+      commitSegments((prev) =>
+        prev.map((s, i) => {
+          if (i !== idx) return s;
+          const next = { ...s, ...patch };
+          if ('text' in patch) next.words = undefined; // 文字被改過，逐字時間對應失效
+          return next;
+        })
+      );
     },
     [commitSegments]
   );
@@ -243,6 +252,7 @@ function App() {
             start: a.start,
             end: b.end,
             text: `${a.text}${a.text ? ' ' : ''}${b.text}`.trim(),
+            words: a.words && b.words ? [...a.words, ...b.words] : undefined,
           });
           return next;
         }
@@ -255,6 +265,7 @@ function App() {
             start: a.start,
             end: b.end,
             text: `${a.text}${a.text ? ' ' : ''}${b.text}`.trim(),
+            words: a.words && b.words ? [...a.words, ...b.words] : undefined,
           });
           return next;
         }
@@ -298,14 +309,31 @@ function App() {
           return;
         }
       }
-      const splitTime = seg.start + (seg.end - seg.start) * (sc / text.length);
+      // 若逐字時間戳仍對得上文字，切點時間用「游標前最後一個字」的真實時間
+      const wSplit =
+        seg.words?.length && wordsToText(seg.words) === text ? splitWordsAt(seg.words, sc) : null;
+      const splitTime =
+        wSplit && wSplit.boundary != null
+          ? Math.max(seg.start, Math.min(wSplit.boundary, seg.end))
+          : seg.start + (seg.end - seg.start) * (sc / text.length);
       commitSegments((prev) => {
         if (!prev[idx]) return prev;
         const next = [...prev];
-        next.splice(idx, 1, { ...seg, text: t1 }, { start: splitTime, end: seg.end, text: t2 });
+        next.splice(
+          idx,
+          1,
+          { ...seg, text: t1, end: splitTime, words: wSplit?.left },
+          { start: splitTime, end: seg.end, text: t2, words: wSplit?.right }
+        );
         return next;
       });
-      showNotice(fallback ? '已切分（游標在文字邊界，自動改在句點後切）' : '已切分為 2 段');
+      showNotice(
+        wSplit
+          ? '已切分為 2 段（依逐字時間精準切點）'
+          : fallback
+            ? '已切分（游標在文字邊界，自動改在句點後切）'
+            : '已切分為 2 段'
+      );
     },
     [commitSegments, showNotice]
   );

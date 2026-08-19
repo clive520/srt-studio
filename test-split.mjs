@@ -43,7 +43,26 @@ await page.waitForSelector('.tl-block', { timeout: 20000 });
 await page.click('.tl-block >> nth=0');
 await page.waitForTimeout(200);
 
+// 情境 C：依逐字時間戳精準切分（不編輯文字，直接設游標）
+// 第一段文字『第一句。』words：第一句[0,1.0]、。[1.0,1.05]
+// 游標在『句』與『。』之間（caret 3）→ 切點應為真實字界 1.0
+// （比例法會切在 0 + 1.25×3/4 = 0.94，兩者可區分）
+await page.evaluate(() => {
+  const ta = document.querySelector('.main-edit textarea');
+  ta.focus();
+  ta.setSelectionRange(3, 3);
+});
+await page.click('text=在游標處切分');
+await page.waitForTimeout(300);
+let blocks = await page.locator('.tl-block').count();
+check('C) 依逐字時間切分（游標在字與字之間，3 段）', blocks === 3, `blocks=${blocks}`);
+const endC = parseFloat(await page.locator('.main-edit-time input >> nth=1').inputValue());
+check('C) 切點 = 真實字界時間 1.0s（非比例估計 0.94s）', Math.abs(endC - 1.0) < 0.04, `end=${endC} (比例法會是 0.94)`);
+const noticeC = await page.locator('.banner.info').textContent().catch(() => '');
+check('C) 提示依逐字時間切分', /逐字/.test(noticeC || ''), `notice=${noticeC}`);
+
 // 情境 A：點「在游標處切分」按鈕（textarea 會失焦）——游標放中間
+// （改文字會使逐字對應失效，驗證退回比例法仍正常）
 await page.fill('.main-edit textarea', '今天天氣很好');
 await page.evaluate(() => {
   const ta = document.querySelector('.main-edit textarea');
@@ -52,8 +71,8 @@ await page.evaluate(() => {
 });
 await page.click('text=在游標處切分');
 await page.waitForTimeout(300);
-let blocks = await page.locator('.tl-block').count();
-check('A) 點按鈕切分（游標中段，3 段）', blocks === 3, `blocks=${blocks}`);
+blocks = await page.locator('.tl-block').count();
+check('A) 點按鈕切分（游標中段，4 段）', blocks === 4, `blocks=${blocks}`);
 const noticeA = await page.locator('.banner.info').textContent().catch(() => '');
 check('A) 顯示切分成功提示', /已切分/.test(noticeA || ''), `notice=${noticeA}`);
 
@@ -64,7 +83,7 @@ await page.waitForTimeout(200);
 await page.click('text=在游標處切分');
 await page.waitForTimeout(300);
 blocks = await page.locator('.tl-block').count();
-check('B) 游標在結尾仍可切分（fallback，段數增加）', blocks === 4, `blocks=${blocks}`);
+check('B) 游標在結尾仍可切分（fallback，段數增加）', blocks === 5, `blocks=${blocks}`);
 
 console.log('\n=== RESULT ===');
 const failed = results.filter((r) => !r.ok);

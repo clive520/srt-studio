@@ -38,8 +38,9 @@ export default function EditPanel({
 
   const handleSplit = () => {
     const el = textRef.current;
-    const live = el && document.activeElement === el ? el.selectionStart : null;
-    const caret = live ?? caretRef.current ?? Math.floor(s.text.length / 2);
+    // selectionStart 隨時代表目前游標位置（即使失焦也保留），
+    // 所以直接讀取，不需檢查焦點（點按鈕會讓 textarea 失焦）
+    const caret = el ? el.selectionStart : caretRef.current ?? Math.floor(s.text.length / 2);
     onSplit(activeIdx, caret);
   };
 

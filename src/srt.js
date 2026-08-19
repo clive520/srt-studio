@@ -52,6 +52,7 @@ export function cleanSegments(segs, opts) {
       start: Math.max(0, x.start),
       end: Math.max(0, x.end),
       text: x.text.trim(),
+      words: x.words,
     }))
     .sort((a, b) => a.start - b.start || a.end - b.end);
 
@@ -61,7 +62,7 @@ export function cleanSegments(segs, opts) {
     const start = Math.max(x.start, prevEnd);
     const end = Math.max(x.end, start + 0.3);
     prevEnd = end;
-    out.push({ start, end, text: x.text });
+    out.push({ start, end, text: x.text, words: x.words });
   }
   return applyLinger(out, opts);
 }
@@ -109,7 +110,13 @@ export function buildSegmentsFromWords(
   const flush = () => {
     if (!buf.length) return;
     const text = buf.map((w) => w.word).join('').replace(/\s+/g, ' ').trim();
-    if (text) segs.push({ start: buf[0].start, end: buf[buf.length - 1].end, text });
+    if (text)
+      segs.push({
+        start: buf[0].start,
+        end: buf[buf.length - 1].end,
+        text,
+        words: buf.map((w) => ({ word: w.word, start: w.start, end: w.end })),
+      });
     buf = [];
     bufStart = null;
   };
@@ -140,11 +147,38 @@ export function buildSegmentsFromWords(
     if (prev && s.end - s.start < 0.45 && prev.end - prev.start < 8) {
       prev.text = `${prev.text} ${s.text}`.trim();
       prev.end = s.end;
+      prev.words = [...(prev.words || []), ...(s.words || [])];
     } else {
       out.push(s);
     }
   }
   return out;
+}
+
+/** 把字詞陣列還原成與段落一致的文字（與 buildSegmentsFromWords 相同規則） */
+export function wordsToText(words) {
+  return (words || []).map((w) => w.word).join('').replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * 依游標字元位置切分字詞陣列：
+ * - caret 正好在某個字後面 → 切成左右兩半，切點時間 = 下一字開始的真實時間
+ * - caret 落在某個字中間（如英文單字）→ 右半從該字開始，切點 = 該字開始時間
+ * 回傳 null 代表無法對應（文字與字詞對不上）。
+ */
+export function splitWordsAt(words, caret) {
+  if (!words || !words.length) return null;
+  let acc = '';
+  for (let i = 0; i < words.length; i++) {
+    const next = `${acc}${words[i].word}`.replace(/\s+/g, ' ').trim();
+    if (caret < next.length) return { left: words.slice(0, i), right: words.slice(i), boundary: words[i].start };
+    if (caret === next.length) {
+      const k = i + 1;
+      return { left: words.slice(0, k), right: words.slice(k), boundary: (words[k] || words[i]).start };
+    }
+    acc = next;
+  }
+  return { left: words, right: [], boundary: null };
 }
 
 export function downloadSRT(segs) {
