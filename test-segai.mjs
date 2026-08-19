@@ -8,42 +8,46 @@ const browser = await chromium.launch({ executablePath: EXE, headless: true, arg
 const page = await browser.newPage();
 page.on('pageerror', (e) => console.log('[pageerror]', e.message));
 
-// 轉錄 mock：6 個字詞。AI 分段 mock（chat/completions）：
+// 轉錄 mock：6 個字詞。分段 mock（/api/segment）：
 //   第 1 次（轉錄後自動跑）回 [2,6]；第 2 次（按鈕手動重跑）回 [2,4,6]（三句各一段）
-let promptOk = false;
-let chatCalls = 0;
-await page.route('**/api.groq.com/**', (route) => {
-  const u = route.request().url();
-  if (u.includes('chat/completions')) {
-    chatCalls++;
-    const body = route.request().postData() || '';
-    const sent = JSON.parse(body).messages[0].content;
-    promptOk = /1\. 第一句 \[0\.0-1\.0\]/.test(sent) && /6\. 。 \[3\.8-/.test(sent);
-    route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({
-        choices: [{ message: { content: chatCalls === 1 ? '{"boundaries":[2,6]}' : '{"boundaries":[2,4,6]}' } }],
-      }),
-    });
-  } else {
-    route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({
-        text: '第一句。第二句。第三句。',
-        words: [
-          { word: '第一句', start: 0.0, end: 1.0 },
-          { word: '。', start: 1.0, end: 1.05 },
-          { word: '第二句', start: 1.4, end: 2.4 },
-          { word: '。', start: 2.4, end: 2.45 },
-          { word: '第三句', start: 2.9, end: 3.8 },
-          { word: '。', start: 3.8, end: 3.85 },
-        ],
-        segments: [{ start: 0, end: 3.9, text: '第一句。第二句。第三句。' }],
-      }),
-    });
-  }
+let segCalls = 0;
+await page.route('**/api/status', (route) => {
+  route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      stt: { provider: 'groq', model: 'whisper-large-v3-turbo', providerName: 'Groq', modelName: 'Whisper large-v3-turbo', hasKey: true },
+      seg: { provider: 'opencode-go', model: 'deepseek-v4-flash', providerName: 'OpenCode GO', modelName: 'DeepSeek V4 Flash', hasKey: true },
+    }),
+  });
+});
+
+await page.route('**/api/transcribe', (route) => {
+  route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      text: '第一句。第二句。第三句。',
+      words: [
+        { word: '第一句', start: 0.0, end: 1.0 },
+        { word: '。', start: 1.0, end: 1.05 },
+        { word: '第二句', start: 1.4, end: 2.4 },
+        { word: '。', start: 2.4, end: 2.45 },
+        { word: '第三句', start: 2.9, end: 3.8 },
+        { word: '。', start: 3.8, end: 3.85 },
+      ],
+      segments: [{ start: 0, end: 3.9, text: '第一句。第二句。第三句。' }],
+    }),
+  });
+});
+
+await page.route('**/api/segment', (route) => {
+  segCalls++;
+  route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ boundaries: segCalls === 1 ? [2, 6] : [2, 4, 6] }),
+  });
 });
 
 const results = [];
@@ -53,7 +57,19 @@ const check = (name, ok, extra = '') => {
 };
 
 await page.goto(URL, { waitUntil: 'domcontentloaded' });
-await page.fill('.key-label input', 'fake-key');
+
+// 一般使用者看不到 Key 輸入框與供應商選單，只看到模型徽章
+const keyInputs = await page.locator('.key-label input').count();
+check('前臺沒有 API Key 輸入框', keyInputs === 0, `keyInputs=${keyInputs}`);
+const providerSelects = await page.locator('.settings select').count();
+check('前臺只保留語言/輸出選單（無供應商選單）', providerSelects === 2, `selects=${providerSelects}`);
+const badgeText = await page.locator('.model-badge').allTextContents();
+check(
+  '徽章顯示目前使用的模型（辨識＋分段）',
+  badgeText.some((t) => t.includes('Whisper large-v3-turbo')) && badgeText.some((t) => t.includes('DeepSeek V4 Flash')),
+  JSON.stringify(badgeText)
+);
+
 await page.setInputFiles('#file-input', WAV);
 await page.waitForFunction(() => {
   const b = document.querySelector('.file-bar .btn.primary');
@@ -68,8 +84,7 @@ await page.waitForTimeout(1500);
 // 啟發式分段不會先出現又閃走；直接驗證自動 AI 分段的結果
 let blocks = await page.locator('.tl-block').count();
 check('轉錄後自動 AI 分段（不用手動按，2 段）', blocks === 2, `blocks=${blocks}`);
-check('自動 AI 分段共呼叫 1 次', chatCalls === 1, `chatCalls=${chatCalls}`);
-check('送給 AI 的逐字稿含編號與時間', promptOk, 'prompt ok');
+check('自動 AI 分段共呼叫 1 次', segCalls === 1, `segCalls=${segCalls}`);
 
 // 驗證段界與時間：段2 起點 = 第二句真實開始 1.4s（不是啟發式比例）
 await page.click('.tl-block >> nth=1');

@@ -64,3 +64,38 @@ export async function extractAudio(file, onProgress) {
   await ffmpeg.deleteFile(outName).catch(() => {});
   return new Blob([data], { type: 'audio/mpeg' });
 }
+
+/**
+ * 上傳前壓縮：伺服器端點（Vercel Hobby）請求上限約 4.5MB。
+ * 超過就轉成 16kHz 單聲道 48kbps mp3（約 6KB/s，10 分鐘 ≈ 3.6MB）。
+ * 回傳 { blob, filename, compressed }。
+ */
+export async function prepareUpload(blob, filename, onProgress) {
+  if (blob.size <= 4.2 * 1024 * 1024) {
+    return { blob, filename, compressed: false };
+  }
+  const ffmpeg = await getFFmpeg(onProgress);
+  const ext = (filename?.split('.').pop() || 'mp3').toLowerCase();
+  const inName = `in.${ext}`;
+  const outName = 'out.mp3';
+  await ffmpeg.writeFile(inName, await fetchFile(blob));
+  let ret;
+  try {
+    ret = await ffmpeg.exec([
+      '-i', inName,
+      '-vn', '-ac', '1', '-ar', '16000', '-b:a', '48k',
+      '-y', outName,
+    ]);
+  } catch (e) {
+    const detail = ffmpegLogs.join('\n').trim();
+    throw new Error(`音檔壓縮失敗${detail ? `：${detail}` : ''}`);
+  }
+  if (ret !== 0) {
+    const detail = ffmpegLogs.join('\n').trim();
+    throw new Error(`音檔壓縮失敗${detail ? `：${detail}` : ''}`);
+  }
+  const data = await ffmpeg.readFile(outName);
+  await ffmpeg.deleteFile(inName).catch(() => {});
+  await ffmpeg.deleteFile(outName).catch(() => {});
+  return { blob: new Blob([data], { type: 'audio/mpeg' }), filename: 'compressed.mp3', compressed: true };
+}

@@ -1,4 +1,4 @@
-import { segmentByAI } from './src/providers.js';
+import { segmentByAI } from './api/_lib/segment.js';
 
 const results = [];
 const check = (name, ok, extra = '') => {
@@ -10,6 +10,8 @@ const check = (name, ok, extra = '') => {
 // 驗證批次編號換算回全域 + 批次數 + 每批 prompt 內容。
 const words = [];
 for (let i = 0; i < 2500; i++) words.push({ word: '字', start: i * 0.4, end: i * 0.4 + 0.3 });
+
+const PROV = { kind: 'openai', baseUrl: 'https://api.groq.com/openai/v1', model: 'groq/compound-mini', key: 'k' };
 
 const calls = [];
 const prompts = [];
@@ -26,10 +28,7 @@ globalThis.fetch = async (url, opts) => {
   };
 };
 
-const boundaries = await segmentByAI(
-  { id: 'groq', form: 'openai' },
-  { key: 'k', words }
-);
+const boundaries = await segmentByAI(PROV, { words });
 
 check('分批：共 3 次請求', calls.length === 3, `calls=${calls.length}`);
 check('每批都送 chat/completions', calls.every((u) => u.includes('chat/completions')), '');
@@ -52,7 +51,7 @@ check('段界換算回全域：[500, 1700, 2300]', JSON.stringify(boundaries) ==
 check('段界已排序', boundaries.every((b, i) => i === 0 || boundaries[i - 1] < b), '');
 
 // 單批（短音檔）行為不變
-const short = await segmentByAI({ id: 'groq', form: 'openai' }, { key: 'k', words: words.slice(0, 50) });
+const short = await segmentByAI(PROV, { words: words.slice(0, 50) });
 check('短音檔只送 1 批', prompts.length === 4, `calls=${prompts.length}`);
 check('短音檔段界正常', JSON.stringify(short) === '[50]', `got=${JSON.stringify(short)}`);
 
@@ -60,12 +59,35 @@ check('短音檔段界正常', JSON.stringify(short) === '[50]', `got=${JSON.str
 globalThis.fetch = async () => ({ ok: true, json: async () => ({ choices: [{ message: { content: '抱歉，無法處理' } }] }) });
 let threw = false;
 try {
-  await segmentByAI({ id: 'groq', form: 'openai' }, { key: 'k', words });
+  await segmentByAI(PROV, { words });
 } catch (e) {
   threw = true;
   check('全部批次無效 → 拋錯', /段界|解析/.test(e.message), e.message);
 }
 check('全部批次無效確實拋錯', threw, '');
+
+// Anthropic 格式：x-api-key + anthropic-version + system 欄位
+let anBody = null;
+let anHeaders = null;
+globalThis.fetch = async (url, opts) => {
+  anHeaders = opts.headers;
+  anBody = JSON.parse(opts.body);
+  return {
+    ok: true,
+    json: async () => ({ content: [{ type: 'text', text: '{"boundaries":[2]}' }] }),
+  };
+};
+const an = await segmentByAI(
+  { kind: 'anthropic', baseUrl: 'https://api.anthropic.com', model: 'claude-sonnet-4-6', key: 'sk-an' },
+  { words: words.slice(0, 50) }
+);
+check(
+  'Anthropic：送 /v1/messages + x-api-key + anthropic-version',
+  anHeaders['x-api-key'] === 'sk-an' && anHeaders['anthropic-version'] === '2023-06-01',
+  ''
+);
+check('Anthropic：body 含 system 與 max_tokens', anBody.system && anBody.max_tokens === 2000 && anBody.messages[0].role === 'user', '');
+check('Anthropic：從 content[0].text 取段界', JSON.stringify(an) === '[2]', `got=${JSON.stringify(an)}`);
 
 console.log('\n=== RESULT ===');
 const failed = results.filter((r) => !r.ok);

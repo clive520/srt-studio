@@ -17,7 +17,18 @@ page.on('console', (m) => {
   if (m.type() === 'error' && !/404|Failed to load resource/.test(m.text())) errors.push(`[console] ${m.text()}`);
 });
 
-await page.route('**/api.groq.com/**', (route) => {
+await page.route('**/api/status', (route) => {
+  route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      stt: { provider: 'groq', model: 'whisper-large-v3-turbo', providerName: 'Groq', modelName: 'Whisper large-v3-turbo', hasKey: true },
+      seg: { provider: 'opencode-go', model: 'deepseek-v4-flash', providerName: 'OpenCode GO', modelName: 'DeepSeek V4 Flash', hasKey: true },
+    }),
+  });
+});
+
+await page.route('**/api/transcribe', (route) => {
   route.fulfill({
     status: 200,
     contentType: 'application/json',
@@ -36,6 +47,14 @@ await page.route('**/api.groq.com/**', (route) => {
   });
 });
 
+await page.route('**/api/segment', (route) => {
+  route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ boundaries: [2, 4, 6] }),
+  });
+});
+
 const results = [];
 const check = (name, ok, extra = '') => {
   results.push({ name, ok });
@@ -44,7 +63,6 @@ const check = (name, ok, extra = '') => {
 
 await page.goto(URL, { waitUntil: 'domcontentloaded' });
 
-await page.fill('.key-label input', 'fake-key');
 await page.setInputFiles('#file-input', WAV);
 
 await page.waitForFunction(() => {
