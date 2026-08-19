@@ -161,6 +161,37 @@ export function wordsToText(words) {
 }
 
 /**
+ * 依 AI 給的段界重建字幕段。boundaries 是「每一段最後一個字詞的索引」（1-based），
+ * 過濾掉無效值後依序切片，段時間直接採用該段首/尾字的真實時間。
+ */
+export function buildSegmentsFromRanges(words, boundaries) {
+  const tokens = words.filter((w) => w.word && w.word.trim());
+  if (!tokens.length) return [];
+  const bs = [...new Set((boundaries || []).map((b) => Math.round(b)))].filter(
+    (b) => Number.isFinite(b) && b >= 1 && b <= tokens.length
+  ).sort((a, b) => a - b);
+  const segs = [];
+  const push = (buf) => {
+    if (!buf.length) return;
+    const text = buf.map((w) => w.word).join('').replace(/\s+/g, ' ').trim();
+    if (text)
+      segs.push({
+        start: buf[0].start,
+        end: buf[buf.length - 1].end,
+        text,
+        words: buf.map((w) => ({ word: w.word, start: w.start, end: w.end })),
+      });
+  };
+  let prev = 0;
+  for (const b of bs) {
+    push(tokens.slice(prev, b));
+    prev = b;
+  }
+  push(tokens.slice(prev));
+  return segs;
+}
+
+/**
  * 依游標字元位置切分字詞陣列：
  * - caret 正好在某個字後面 → 切成左右兩半，切點時間 = 下一字開始的真實時間
  * - caret 落在某個字中間（如英文單字）→ 右半從該字開始，切點 = 該字開始時間

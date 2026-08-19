@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { PROVIDERS, LANGUAGES, transcribe } from './providers.js';
+import { PROVIDERS, LANGUAGES, transcribe, segmentByAI } from './providers.js';
 import {
   cleanSegments,
   buildSegmentsFromWords,
+  buildSegmentsFromRanges,
   wordsToText,
   splitWordsAt,
   toSRT,
@@ -341,6 +342,36 @@ function App() {
   const fixTimeline = useCallback(() => {
     commitSegments((prev) => cleanSegments(prev));
   }, [commitSegments]);
+
+  // AI 重新分段：把逐字稿（含逐字時間）再送一次給 AI 決定段界，重建字幕段
+  const aiSegments = useCallback(async () => {
+    const all = [];
+    for (const s of segsRef.current) {
+      if (!s.words?.length) {
+        setError('部分字幕的文字已被修改、失去逐字時間對應，請重新辨識後再使用 AI 分段');
+        return;
+      }
+      all.push(...s.words);
+    }
+    if (all.length < 3) {
+      setError('字詞數量不足（至少 3 個字），無法 AI 分段');
+      return;
+    }
+    setBusy(true);
+    setProgress({ label: 'AI 正在重新分段…', pct: 0.5 });
+    try {
+      const boundaries = await segmentByAI(provider, { key: apiKey.trim(), words: all });
+      const rebuilt = buildSegmentsFromRanges(all, boundaries);
+      if (rebuilt.length < 2) throw new Error('AI 分段結果無法使用，請再試一次');
+      commitSegments(await convertSegments(cleanSegments(rebuilt), outputLang));
+      setActiveIdx(0);
+      showNotice(`已依 AI 分段重建 ${rebuilt.length} 段`);
+    } catch (e) {
+      setError(e.message || 'AI 分段失敗');
+    } finally {
+      setBusy(false);
+    }
+  }, [provider, apiKey, outputLang, commitSegments, showNotice]);
 
   const resizeLive = useCallback(
     (idx, patch) => {
@@ -721,6 +752,14 @@ function App() {
               </button>
               <button className="btn" onClick={fixTimeline} disabled={!segments.length}>
                 🔧 修正時間軸
+              </button>
+              <button
+                className="btn"
+                onClick={aiSegments}
+                disabled={busy || !segments.length}
+                title="把逐字稿再送給 AI 決定分段點，依真實字詞時間重建字幕段"
+              >
+                🤖 AI 重新分段
               </button>
               <button className="btn" onClick={undo} disabled={!segments.length}>
                 ↩ 復原
