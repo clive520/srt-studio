@@ -1027,3 +1027,114 @@ kbd {
   text-align: center;
   font-size: 13px;
 }
+
+/* 模型設定面板 */
+.settings-modal {
+  max-width: 720px;
+  width: 92vw;
+}
+
+.settings-intro {
+  margin: 0 0 16px;
+  font-size: 13.5px;
+  color: var(--muted);
+}
+
+.settings-card {
+  background: var(--bg-2);
+  border: 1px solid rgba(42, 48, 64, 0.6);
+  border-radius: 10px;
+  padding: 16px 18px;
+  margin-bottom: 14px;
+}
+
+.settings-card h3 {
+  margin: 0 0 4px;
+  font-size: 15px;
+}
+
+.settings-desc {
+  margin: 0 0 12px;
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+.settings-rows {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-end;
+}
+
+.settings-rows label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.settings-rows select,
+.settings-rows input {
+  padding: 7px 9px;
+  border: 1px solid rgba(42, 48, 64, 0.6);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 13.5px;
+  min-width: 170px;
+}
+
+.settings-rows .key-label input {
+  min-width: 280px;
+}
+
+.settings-rows .key-link {
+  font-size: 12.5px;
+  padding-bottom: 7px;
+}
+
+.settings-models {
+  margin-top: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.settings-models .model-chip.active {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.settings-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  font-size: 12.5px;
+  color: var(--muted);
+  margin: 4px 0 10px;
+}
+
+.settings-hint {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.settings-hint .show-keys {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.settings-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--muted);
+}

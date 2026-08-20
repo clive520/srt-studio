@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { LANGUAGES } from './providers.js';
-import { getStatus, transcribe as apiTranscribe, segment as apiSegment } from './api.js';
+import { getCatalog, transcribe as apiTranscribe, segment as apiSegment } from './api.js';
 import {
   cleanSegments,
   buildSegmentsFromWords,
@@ -16,16 +16,21 @@ import { convertSegments, OUTPUT_LANGS } from './lang.js';
 import { useHistory } from './useHistory.js';
 import Timeline from './Timeline.jsx';
 import EditPanel from './EditPanel.jsx';
-import AdminPage from './Admin.jsx';
+import SettingsPanel from './Settings.jsx';
 import { SHORTCUTS } from './shortcuts.js';
 
 const LS = {
+  stt: 'srt-studio:stt',
+  seg: 'srt-studio:seg',
   lang: 'srt-studio:lang',
   outLang: 'srt-studio:outlang',
   segs: 'srt-studio:segs',
   zoom: 'srt-studio:zoom',
   preview: 'srt-studio:preview',
 };
+
+const DEFAULT_STT = { provider: 'groq', model: 'whisper-large-v3-turbo', key: '' };
+const DEFAULT_SEG = { provider: 'opencode-go', model: 'deepseek-v4-flash', key: '' };
 
 function load(key, fallback) {
   try {
@@ -45,23 +50,18 @@ function isTypingTarget(e) {
 }
 
 function App() {
+  const [stt, setStt] = useState(() => ({ ...DEFAULT_STT, ...load(LS.stt, {}) }));
+  const [seg, setSeg] = useState(() => ({ ...DEFAULT_SEG, ...load(LS.seg, {}) }));
+  const [catalog, setCatalog] = useState(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [language, setLanguage] = useState(() => load(LS.lang, 'auto'));
   const [outputLang, setOutputLang] = useState(() => load(LS.outLang, 'traditional'));
-  const [status, setStatus] = useState(null);
-  const [view, setView] = useState(window.location.hash);
 
   useEffect(() => {
-    const f = () => setView(window.location.hash);
-    window.addEventListener('hashchange', f);
-    return () => window.removeEventListener('hashchange', f);
+    getCatalog()
+      .then(setCatalog)
+      .catch(() => setCatalog(null));
   }, []);
-
-  useEffect(() => {
-    if (view === '#admin') return;
-    getStatus()
-      .then(setStatus)
-      .catch(() => setStatus(null));
-  }, [view]);
 
   const [file, setFile] = useState(null);
   const [fileUrl, setFileUrl] = useState(null);
@@ -98,6 +98,8 @@ function App() {
   const segsRef = useRef(segments);
   segsRef.current = segments;
 
+  useEffect(() => localStorage.setItem(LS.stt, JSON.stringify(stt)), [stt]);
+  useEffect(() => localStorage.setItem(LS.seg, JSON.stringify(seg)), [seg]);
   useEffect(() => localStorage.setItem(LS.lang, JSON.stringify(language)), [language]);
   useEffect(() => localStorage.setItem(LS.outLang, JSON.stringify(outputLang)), [outputLang]);
   useEffect(() => localStorage.setItem(LS.zoom, JSON.stringify(pxPerSec)), [pxPerSec]);
@@ -181,6 +183,14 @@ function App() {
       setError('請先上傳音檔或影片');
       return;
     }
+    if (!stt.key.trim()) {
+      setError('請先點「🔧 模型設定」填入辨識（聲音變文字）的 API Key');
+      return;
+    }
+    if (!seg.key.trim()) {
+      setError('請先點「🔧 模型設定」填入分段（句子分段）的 API Key');
+      return;
+    }
     setError(null);
     setBusy(true);
     setProgress({ label: '正在辨識…', pct: 0.2 });
@@ -194,6 +204,7 @@ function App() {
         blob: up.blob,
         filename: up.filename,
         language,
+        stt: { provider: stt.provider, model: stt.model, key: stt.key.trim() },
         onProgress: () => setProgress({ label: up.compressed ? '辨識中（已壓縮音檔）…' : '正在辨識…', pct: 0.2 }),
       });
 
@@ -206,7 +217,10 @@ function App() {
       if (result.words?.length >= 3) {
         setProgress({ label: 'AI 正在重新分段…', pct: 0.6 });
         try {
-          const boundaries = await apiSegment({ words: result.words });
+          const boundaries = await apiSegment({
+            words: result.words,
+            seg: { provider: seg.provider, model: seg.model, key: seg.key.trim() },
+          });
           const rebuilt = buildSegmentsFromRanges(result.words, boundaries);
           if (rebuilt.length < 2) throw new Error('AI 分段結果無法使用');
           commitSegments(await convertSegments(cleanSegments(rebuilt), outputLang));
@@ -224,7 +238,7 @@ function App() {
     } finally {
       setBusy(false);
     }
-  }, [audioBlob, audioName, language, outputLang, commitSegments]);
+  }, [audioBlob, audioName, language, outputLang, commitSegments, stt, seg]);
 
   const updateSegment = useCallback(
     (idx, patch) => {
@@ -382,7 +396,10 @@ function App() {
     setBusy(true);
     setProgress({ label: 'AI 正在重新分段…', pct: 0.5 });
     try {
-      const boundaries = await apiSegment({ words: all });
+      const boundaries = await apiSegment({
+        words: all,
+        seg: { provider: seg.provider, model: seg.model, key: seg.key.trim() },
+      });
       const rebuilt = buildSegmentsFromRanges(all, boundaries);
       if (rebuilt.length < 2) throw new Error('AI 分段結果無法使用，請再試一次');
       commitSegments(await convertSegments(cleanSegments(rebuilt), outputLang));
@@ -393,7 +410,7 @@ function App() {
     } finally {
       setBusy(false);
     }
-  }, [outputLang, commitSegments, showNotice]);
+  }, [seg, outputLang, commitSegments, showNotice]);
 
   const resizeLive = useCallback(
     (idx, patch) => {
@@ -592,7 +609,19 @@ function App() {
 
   const currentText = playIdx >= 0 ? segments[playIdx]?.text : '';
 
-  if (view === '#admin') return <AdminPage />;
+  // 從目錄找目前設定對應的顯示名稱
+  const sttName = useMemo(() => {
+    if (!catalog || !stt.provider) return null;
+    const p = (catalog.stt || []).find((x) => x.id === stt.provider);
+    const m = p?.models?.find((x) => x.id === stt.model);
+    return p && m ? `${p.name}・${m.name}${stt.key ? '' : '（未填 Key）'}` : null;
+  }, [catalog, stt]);
+  const segName = useMemo(() => {
+    if (!catalog || !seg.provider) return null;
+    const p = (catalog.seg || []).find((x) => x.id === seg.provider);
+    const m = p?.models?.find((x) => x.id === seg.model);
+    return p && m ? `${p.name}・${m.name}${seg.key ? '' : '（未填 Key）'}` : null;
+  }, [catalog, seg]);
 
   return (
     <div className="app">
@@ -605,11 +634,11 @@ function App() {
           </div>
         </div>
         <div className="settings">
-          <span className="model-badge" title="語音辨識使用的模型（由管理員設定）">
-            🔊 辨識：{status ? `${status.stt?.providerName}・${status.stt?.modelName}` : '未設定'}
+          <span className="model-badge" title="聲音變文字使用的模型（可免費/付費）">
+            🔊 辨識：{sttName || '未設定'}
           </span>
-          <span className="model-badge" title="句子分段使用的模型（由管理員設定）">
-            ✂️ 分段：{status ? `${status.seg?.providerName}・${status.seg?.modelName}` : '未設定'}
+          <span className="model-badge" title="句子分段使用的模型（可免費/付費）">
+            ✂️ 分段：{segName || '未設定'}
           </span>
           <label>
             語言
@@ -631,9 +660,9 @@ function App() {
               ))}
             </select>
           </label>
-          <a className="btn small" href="#admin" title="管理員：設定辨識與分段模型">
-            ⚙️ 系統設定
-          </a>
+          <button className="btn small" onClick={() => setSettingsOpen(true)} title="選擇辨識與分段模型，並填入你自己的 API Key">
+            🔧 模型設定
+          </button>
         </div>
       </header>
 
@@ -823,6 +852,17 @@ function App() {
         )}
       </main>
 
+      {settingsOpen && catalog && (
+        <SettingsPanel
+          catalog={catalog}
+          stt={stt}
+          seg={seg}
+          setStt={setStt}
+          setSeg={setSeg}
+          onClose={() => setSettingsOpen(false)}
+        />
+      )}
+
       {showHelp && (
         <div className="modal-overlay" onClick={() => setShowHelp(false)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
@@ -852,7 +892,7 @@ function App() {
       )}
 
       <footer>
-        模型由管理員在「⚙️ 系統設定」中配置，Key 只儲存在伺服器端；本站不會留存你的檔案與字幕。
+        辨識與分段模型可在「🔧 模型設定」中選擇（各有免費與付費選項），Key 只存於你的瀏覽器；本站不會留存你的檔案、字幕與 Key。
       </footer>
     </div>
   );

@@ -17,15 +17,25 @@ page.on('console', (m) => {
   if (m.type() === 'error' && !/404|Failed to load resource/.test(m.text())) errors.push(`[console] ${m.text()}`);
 });
 
-await page.route('**/api/status', (route) => {
-  route.fulfill({
-    status: 200,
-    contentType: 'application/json',
-    body: JSON.stringify({
-      stt: { provider: 'groq', model: 'whisper-large-v3-turbo', providerName: 'Groq', modelName: 'Whisper large-v3-turbo', hasKey: true },
-      seg: { provider: 'opencode-go', model: 'deepseek-v4-flash', providerName: 'OpenCode GO', modelName: 'DeepSeek V4 Flash', hasKey: true },
-    }),
-  });
+const CATALOG = {
+  stt: [
+    { id: 'groq', name: 'Groq', free: true, keyUrl: 'https://console.groq.com/keys', models: [{ id: 'whisper-large-v3-turbo', name: 'Whisper large-v3-turbo', note: '免費・支援逐字時間戳' }] },
+    { id: 'openai', name: 'OpenAI', free: false, keyUrl: 'https://platform.openai.com/api-keys', models: [{ id: 'whisper-1', name: 'Whisper-1', note: '付費' }] },
+    { id: 'assemblyai', name: 'AssemblyAI', free: false, keyUrl: 'https://www.assemblyai.com/app/account/api-keys', models: [{ id: 'universal', name: 'Universal', note: '有免費額度' }] },
+  ],
+  seg: [
+    { id: 'groq', name: 'Groq', free: true, keyUrl: 'https://console.groq.com/keys', models: [{ id: 'groq/compound-mini', name: 'Compound Mini', note: '免費' }] },
+    { id: 'opencode-go', name: 'OpenCode GO', free: false, keyUrl: 'https://opencode.ai/auth', models: [{ id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash', note: '預設' }] },
+    { id: 'deepseek', name: 'DeepSeek 官方', free: false, keyUrl: 'https://platform.deepseek.com/api_keys', models: [{ id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash', note: '官方' }] },
+    { id: 'gemini', name: 'Google Gemini', free: false, keyUrl: 'https://aistudio.google.com/apikey', models: [{ id: 'gemini-3.5-flash', name: 'Gemini 3.5 Flash', note: '2026 現役' }] },
+    { id: 'openai', name: 'OpenAI', free: false, keyUrl: 'https://platform.openai.com/api-keys', models: [{ id: 'gpt-4o-mini', name: 'GPT-4o mini', note: '付費' }] },
+    { id: 'anthropic', name: 'Anthropic', free: false, keyUrl: 'https://console.anthropic.com/settings/keys', models: [{ id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6', note: '付費' }] },
+    { id: 'nvidia', name: 'NVIDIA', free: true, keyUrl: 'https://build.nvidia.com', models: [{ id: 'nvidia/nemotron-3-super-120b-a12b', name: 'Nemotron 3 Super 120B', note: '免費' }] },
+  ],
+};
+
+await page.route('**/api/catalog', (route) => {
+  route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ catalog: CATALOG }) });
 });
 
 await page.route('**/api/transcribe', (route) => {
@@ -62,6 +72,13 @@ const check = (name, ok, extra = '') => {
 };
 
 await page.goto(URL, { waitUntil: 'domcontentloaded' });
+
+// 在模型設定面板填入兩把 Key（辨識＋分段，各自獨立）
+await page.click('text=🔧 模型設定');
+await page.waitForSelector('.settings-card', { timeout: 10000 });
+await page.fill('.settings-card >> nth=0 >> .key-label input', 'fake-stt-key');
+await page.fill('.settings-card >> nth=1 >> .key-label input', 'fake-seg-key');
+await page.click('.settings-foot .btn.primary');
 
 await page.setInputFiles('#file-input', WAV);
 await page.waitForFunction(() => {

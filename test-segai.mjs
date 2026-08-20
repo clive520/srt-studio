@@ -10,19 +10,31 @@ page.on('pageerror', (e) => console.log('[pageerror]', e.message));
 
 // 轉錄 mock：6 個字詞。分段 mock（/api/segment）：
 //   第 1 次（轉錄後自動跑）回 [2,6]；第 2 次（按鈕手動重跑）回 [2,4,6]（三句各一段）
+const CATALOG = {
+  stt: [
+    { id: 'groq', name: 'Groq', free: true, keyUrl: 'https://console.groq.com/keys', models: [{ id: 'whisper-large-v3-turbo', name: 'Whisper large-v3-turbo', note: '免費・支援逐字時間戳' }] },
+    { id: 'openai', name: 'OpenAI', free: false, keyUrl: 'https://platform.openai.com/api-keys', models: [{ id: 'whisper-1', name: 'Whisper-1', note: '付費' }] },
+  ],
+  seg: [
+    { id: 'groq', name: 'Groq', free: true, keyUrl: 'https://console.groq.com/keys', models: [{ id: 'groq/compound-mini', name: 'Compound Mini', note: '免費' }] },
+    { id: 'opencode-go', name: 'OpenCode GO', free: false, keyUrl: 'https://opencode.ai/auth', models: [{ id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash', note: '預設' }] },
+  ],
+};
+
 let segCalls = 0;
-await page.route('**/api/status', (route) => {
-  route.fulfill({
-    status: 200,
-    contentType: 'application/json',
-    body: JSON.stringify({
-      stt: { provider: 'groq', model: 'whisper-large-v3-turbo', providerName: 'Groq', modelName: 'Whisper large-v3-turbo', hasKey: true },
-      seg: { provider: 'opencode-go', model: 'deepseek-v4-flash', providerName: 'OpenCode GO', modelName: 'DeepSeek V4 Flash', hasKey: true },
-    }),
-  });
+let segBodyOk = false;
+let transcribeFieldsOk = false;
+await page.route('**/api/catalog', (route) => {
+  route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ catalog: CATALOG }) });
 });
 
 await page.route('**/api/transcribe', (route) => {
+  const s = route.request().postDataBuffer().toString('latin1');
+  transcribeFieldsOk =
+    /name="provider"\r\n\r\ngroq\r\n/.test(s) &&
+    /name="model"\r\n\r\nwhisper-large-v3-turbo\r\n/.test(s) &&
+    /name="key"\r\n\r\nfake-stt-key\r\n/.test(s) &&
+    /name="language"\r\n\r\nauto\r\n/.test(s);
   route.fulfill({
     status: 200,
     contentType: 'application/json',
@@ -43,6 +55,13 @@ await page.route('**/api/transcribe', (route) => {
 
 await page.route('**/api/segment', (route) => {
   segCalls++;
+  const body = JSON.parse(route.request().postData() || '{}');
+  segBodyOk =
+    body.provider === 'opencode-go' &&
+    body.model === 'deepseek-v4-flash' &&
+    body.key === 'fake-seg-key' &&
+    Array.isArray(body.words) &&
+    body.words.length === 6;
   route.fulfill({
     status: 200,
     contentType: 'application/json',
@@ -58,15 +77,48 @@ const check = (name, ok, extra = '') => {
 
 await page.goto(URL, { waitUntil: 'domcontentloaded' });
 
-// 一般使用者看不到 Key 輸入框與供應商選單，只看到模型徽章
+// 一般使用者看不到 Key 輸入框（在模型設定面板內），只看到模型徽章
 const keyInputs = await page.locator('.key-label input').count();
-check('前臺沒有 API Key 輸入框', keyInputs === 0, `keyInputs=${keyInputs}`);
+check('主頁面沒有 API Key 輸入框', keyInputs === 0, `keyInputs=${keyInputs}`);
 const providerSelects = await page.locator('.settings select').count();
-check('前臺只保留語言/輸出選單（無供應商選單）', providerSelects === 2, `selects=${providerSelects}`);
-const badgeText = await page.locator('.model-badge').allTextContents();
+check('主頁只保留語言/輸出選單（無供應商選單）', providerSelects === 2, `selects=${providerSelects}`);
+await page.waitForFunction(() => document.querySelectorAll('.model-badge').length === 2, { timeout: 5000 });
+let badgeText = await page.locator('.model-badge').allTextContents();
 check(
-  '徽章顯示目前使用的模型（辨識＋分段）',
-  badgeText.some((t) => t.includes('Whisper large-v3-turbo')) && badgeText.some((t) => t.includes('DeepSeek V4 Flash')),
+  '徽章顯示目前設定（辨識＋分段，未填 Key 有提示）',
+  badgeText.some((t) => t.includes('Whisper large-v3-turbo') && t.includes('未填 Key')) &&
+    badgeText.some((t) => t.includes('DeepSeek V4 Flash') && t.includes('未填 Key')),
+  JSON.stringify(badgeText)
+);
+
+// 開啟模型設定：兩張卡（辨識＋分段）、免費/付費標示
+await page.click('text=🔧 模型設定');
+await page.waitForSelector('.settings-card', { timeout: 10000 });
+let cards = await page.locator('.settings-card').count();
+check('設定面板有 2 張卡（聲音變文字＋句子分段）', cards === 2, `cards=${cards}`);
+const optionText = await page.locator('.settings-card >> nth=0 >> select >> nth=0').locator('option').allTextContents();
+check(
+  '辨識供應商標示免費/付費（Groq（免費））',
+  optionText.some((t) => t.includes('Groq') && t.includes('免費')),
+  JSON.stringify(optionText)
+);
+const segOptionText = await page.locator('.settings-card >> nth=1 >> select >> nth=0').locator('option').allTextContents();
+check(
+  '分段供應商含免費（Groq/NVIDIA）與付費選項',
+  segOptionText.some((t) => t.includes('Groq') && t.includes('免費')) && segOptionText.some((t) => t.includes('OpenCode GO') && t.includes('付費')),
+  JSON.stringify(segOptionText)
+);
+
+// 填入兩把獨立的 Key（辨識一把、分段一把）
+await page.fill('.settings-card >> nth=0 >> .key-label input', 'fake-stt-key');
+await page.fill('.settings-card >> nth=1 >> .key-label input', 'fake-seg-key');
+await page.click('.settings-foot .btn.primary');
+await page.waitForFunction(() => document.querySelectorAll('.key-label input').length === 0, { timeout: 5000 });
+badgeText = await page.locator('.model-badge').allTextContents();
+check(
+  '填 Key 後徽章不再顯示「未填 Key」',
+  badgeText.some((t) => t.includes('Whisper large-v3-turbo') && !t.includes('未填')) &&
+    badgeText.some((t) => t.includes('DeepSeek V4 Flash') && !t.includes('未填')),
   JSON.stringify(badgeText)
 );
 
@@ -85,6 +137,12 @@ await page.waitForTimeout(1500);
 let blocks = await page.locator('.tl-block').count();
 check('轉錄後自動 AI 分段（不用手動按，2 段）', blocks === 2, `blocks=${blocks}`);
 check('自動 AI 分段共呼叫 1 次', segCalls === 1, `segCalls=${segCalls}`);
+check(
+  '辨識請求帶上使用者自己的 provider/model/key/language',
+  transcribeFieldsOk,
+  'multipart fields'
+);
+check('分段請求帶上使用者自己的分段模型與 Key', segBodyOk, 'seg body');
 
 // 驗證段界與時間：段2 起點 = 第二句真實開始 1.4s（不是啟發式比例）
 await page.click('.tl-block >> nth=1');

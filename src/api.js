@@ -1,4 +1,5 @@
-// 前端 API 客戶端：全部走本站 /api/* 代理，Key 只在伺服器端
+// 前端 API 客戶端：語音與分段請求走本站 /api/* 代理（繞過 CORS、統一格式），
+// 但 Key 由使用者在瀏覽器填入、隨每個請求帶上，伺服器不儲存 Key。
 
 async function errFrom(res) {
   let msg = `HTTP ${res.status}`;
@@ -11,15 +12,20 @@ async function errFrom(res) {
   return new Error(msg);
 }
 
-export async function getStatus() {
-  const res = await fetch('/api/status');
+export async function getCatalog() {
+  const res = await fetch('/api/catalog');
   if (!res.ok) throw await errFrom(res);
-  return res.json();
+  const data = await res.json();
+  return data.catalog || null;
 }
 
-export async function transcribe({ blob, filename, language, onProgress }) {
+// stt: { provider, model, key }
+export async function transcribe({ blob, filename, language, stt, onProgress }) {
   const fd = new FormData();
   fd.append('file', blob, filename || 'audio');
+  fd.append('provider', stt.provider);
+  fd.append('model', stt.model);
+  fd.append('key', stt.key);
   fd.append('language', language || 'auto');
   const res = await fetch('/api/transcribe', { method: 'POST', body: fd });
   if (!res.ok) throw await errFrom(res);
@@ -32,32 +38,15 @@ export async function transcribe({ blob, filename, language, onProgress }) {
   };
 }
 
-export async function segment({ words }) {
+// seg: { provider, model, key }
+export async function segment({ words, seg }) {
   const res = await fetch('/api/segment', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ words }),
+    body: JSON.stringify({ words, provider: seg.provider, model: seg.model, key: seg.key }),
   });
   if (!res.ok) throw await errFrom(res);
   const data = await res.json();
   if (!Array.isArray(data.boundaries)) throw new Error('伺服器回傳格式錯誤');
   return data.boundaries;
-}
-
-export async function adminGet(password) {
-  const res = await fetch('/api/admin', {
-    headers: { 'x-admin-password': password },
-  });
-  if (!res.ok) throw await errFrom(res);
-  return res.json();
-}
-
-export async function adminPut(password, body) {
-  const res = await fetch('/api/admin', {
-    method: 'PUT',
-    headers: { 'x-admin-password': password, 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) throw await errFrom(res);
-  return res.json();
 }

@@ -1,18 +1,11 @@
-import { loadConfig } from './_lib/config.js';
 import { findProvider } from './_lib/catalog.js';
 import { transcribe } from './_lib/transcribe.js';
-import { json, readBody } from './_lib/util.js';
+import { json } from './_lib/util.js';
 
 export const maxDuration = 60;
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return json(res, 405, { error: 'Method Not Allowed' });
-
-  const cfg = await loadConfig();
-  const stt = cfg.stt;
-  if (!stt.key) return json(res, 400, { error: '辨識模型尚未設定 API Key（請管理員至後台設定）' });
-  const p = findProvider('stt', stt.provider);
-  if (!p) return json(res, 400, { error: '辨識供應商設定無效' });
 
   const contentType = req.headers['content-type'] || '';
   const boundary = contentType.match(/boundary=([^;]+)/)?.[1] || '';
@@ -24,32 +17,36 @@ export default async function handler(req, res) {
     chunks.push(c);
   }
   const buf = Buffer.concat(chunks);
-  // 手動解析 multipart：取出 file 與 language 欄位
+  if (!boundary) return json(res, 400, { error: '請以 multipart/form-data 上傳' });
+
+  // 手動解析 multipart：取出 file 與 provider/model/key/language 欄位
+  const fields = {};
   let fileBuf = null;
   let fileType = 'application/octet-stream';
   let filename = 'audio';
-  let language = 'auto';
-  if (boundary) {
-    const parts = splitMultipart(buf, boundary);
-    for (const part of parts) {
-      const name = part.headers.match(/name="([^"]+)"/)?.[1];
-      if (name === 'file') {
-        fileBuf = part.body;
-        fileType = part.headers.match(/content-type: ?([^\r\n]+)/i)?.[1] || 'application/octet-stream';
-        filename = part.headers.match(/filename="([^"]+)"/)?.[1] || 'audio';
-      } else if (name === 'language') {
-        language = part.body.toString('utf8').trim() || 'auto';
-      }
+  const parts = splitMultipart(buf, boundary);
+  for (const part of parts) {
+    const name = part.headers.match(/name="([^"]+)"/)?.[1];
+    if (name === 'file') {
+      fileBuf = part.body;
+      fileType = part.headers.match(/content-type: ?([^\r\n]+)/i)?.[1] || 'application/octet-stream';
+      filename = part.headers.match(/filename="([^"]+)"/)?.[1] || 'audio';
+    } else if (name) {
+      fields[name] = part.body.toString('utf8').trim();
     }
-  } else {
-    return json(res, 400, { error: '請以 multipart/form-data 上傳' });
   }
   if (!fileBuf || !fileBuf.length) return json(res, 400, { error: '缺少音檔（file）' });
 
+  const provider = findProvider('stt', fields.provider);
+  if (!provider || !provider.models.some((m) => m.id === fields.model)) {
+    return json(res, 400, { error: '不支援的辨識模型，請在「模型設定」中重新選擇' });
+  }
+  if (!fields.key) return json(res, 400, { error: '缺少辨識 API Key（請在「模型設定」中填入）' });
+
   try {
     const result = await transcribe(
-      { kind: p.kind, baseUrl: p.baseUrl, model: stt.model, key: stt.key },
-      { rawBody: fileBuf, contentType: fileType, filename, language }
+      { kind: provider.kind, baseUrl: provider.baseUrl, model: fields.model, key: fields.key },
+      { rawBody: fileBuf, contentType: fileType, filename, language: fields.language || 'auto' }
     );
     return json(res, 200, result);
   } catch (e) {

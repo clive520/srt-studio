@@ -1,4 +1,3 @@
-import { loadConfig } from './_lib/config.js';
 import { findProvider } from './_lib/catalog.js';
 import { segmentByAI } from './_lib/segment.js';
 import { json, readBody } from './_lib/util.js';
@@ -16,15 +15,15 @@ export default async function handler(req, res) {
   const words = Array.isArray(body?.words) ? body.words : null;
   if (!words) return json(res, 400, { error: '缺少逐字稿（words）' });
 
-  const cfg = await loadConfig();
-  const seg = cfg.seg;
-  if (!seg.key) return json(res, 400, { error: '分段模型尚未設定 API Key（請管理員至後台設定）' });
-  const p = findProvider('seg', seg.provider);
-  if (!p) return json(res, 400, { error: '分段供應商設定無效' });
+  const provider = findProvider('seg', body.provider);
+  if (!provider || !provider.models.some((m) => m.id === body.model)) {
+    return json(res, 400, { error: '不支援的分段模型，請在「模型設定」中重新選擇' });
+  }
+  if (!body.key) return json(res, 400, { error: '缺少分段 API Key（請在「模型設定」中填入）' });
 
   try {
     const boundaries = await segmentByAI(
-      { kind: p.kind, baseUrl: p.baseUrl, model: seg.model, key: seg.key },
+      { kind: provider.kind, baseUrl: provider.baseUrl, model: body.model, key: body.key },
       { words }
     );
     return json(res, 200, { boundaries });
