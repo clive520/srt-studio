@@ -8,7 +8,7 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return json(res, 405, { error: 'Method Not Allowed' });
 
   const contentType = req.headers['content-type'] || '';
-  const boundary = contentType.match(/boundary=([^;]+)/)?.[1] || '';
+  const boundary = contentType.match(/boundary="?([^";]+)"?/)?.[1] || '';
   const chunks = [];
   let size = 0;
   for await (const c of req) {
@@ -26,11 +26,11 @@ export default async function handler(req, res) {
   let filename = 'audio';
   const parts = splitMultipart(buf, boundary);
   for (const part of parts) {
-    const name = part.headers.match(/name="([^"]+)"/)?.[1];
+    const name = partName(part);
     if (name === 'file') {
       fileBuf = part.body;
-      fileType = part.headers.match(/content-type: ?([^\r\n]+)/i)?.[1] || 'application/octet-stream';
-      filename = part.headers.match(/filename="([^"]+)"/)?.[1] || 'audio';
+      fileType = partType(part);
+      filename = partFilename(part) || 'audio';
     } else if (name) {
       fields[name] = part.body.toString('utf8').trim();
     }
@@ -58,14 +58,17 @@ function splitMultipart(buf, boundary) {
   const marker = Buffer.from(`--${boundary}`);
   const out = [];
   let pos = 0;
-  while (true) {
+  while (pos < buf.length) {
     const start = buf.indexOf(marker, pos);
     if (start === -1) break;
-    const headerStart = start + marker.length;
-    let p = headerStart;
-    while (p + 1 < buf.length && !(buf[p] === 0x0d && buf[p + 1] === 0x0a)) p++;
-    const headers = buf.slice(headerStart, p).toString('utf8');
-    p += 2; // skip \r\n
+    const after = start + marker.length;
+    if (buf[after] === 0x2d && buf[after + 1] === 0x2d) break; // 結尾 marker（--boundary--）
+    let p = after;
+    if (buf[p] === 0x0d && buf[p + 1] === 0x0a) p += 2; // 跳過 marker 後的 \r\n
+    const headerEnd = buf.indexOf(Buffer.from('\r\n\r\n'), p);
+    if (headerEnd === -1) break;
+    const headers = buf.slice(p, headerEnd).toString('utf8');
+    p = headerEnd + 4;
     const next = buf.indexOf(marker, p);
     if (next === -1) break;
     let bodyEnd = next;
@@ -74,4 +77,19 @@ function splitMultipart(buf, boundary) {
     pos = next;
   }
   return out;
+}
+
+function partName(part) {
+  const cd = part.headers.split(/\r\n/).find((l) => l.startsWith('Content-Disposition')) || '';
+  return cd.match(/name="([^"]+)"/)?.[1] || null;
+}
+
+function partFilename(part) {
+  const cd = part.headers.split(/\r\n/).find((l) => l.startsWith('Content-Disposition')) || '';
+  return cd.match(/filename="([^"]*)"/)?.[1] || null;
+}
+
+function partType(part) {
+  const ct = part.headers.split(/\r\n/).find((l) => l.toLowerCase().startsWith('content-type:'));
+  return ct ? ct.slice(ct.indexOf(':') + 1).trim() : 'application/octet-stream';
 }
