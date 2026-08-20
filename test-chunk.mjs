@@ -110,7 +110,12 @@ await page.waitForSelector('.tl-block', { timeout: 90000 });
 await page.waitForFunction(() => !document.querySelector('.file-bar .btn.primary')?.disabled, { timeout: 90000 });
 
 check('分段後 /api/transcribe 被呼叫 4 次', transcribeCalls === 4, `calls=${transcribeCalls}`);
-check('四塊檔名為 chunk_000~003', JSON.stringify(sentFilenames) === JSON.stringify(['chunk_000.mp3', 'chunk_001.mp3', 'chunk_002.mp3', 'chunk_003.mp3']), JSON.stringify(sentFilenames));
+const expectFiles = ['chunk_000.mp3', 'chunk_001.mp3', 'chunk_002.mp3', 'chunk_003.mp3'];
+check(
+  '四塊檔名齊全（chunk_000~003）',
+  sentFilenames.length === 4 && expectFiles.every((f) => sentFilenames.includes(f)),
+  JSON.stringify(sentFilenames)
+);
 
 // 合併後 8 個字詞（每塊 2 個），AI 分段 [1,3,5] → 4 段：
 // [你0] [好0.5+你17] [好17.5+你34] [好34.5+你51+好51.5]

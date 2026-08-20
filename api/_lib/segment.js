@@ -86,25 +86,51 @@ async function apiError(res) {
  * 把逐字稿（含逐字時間）交給 AI 決定分段點，回傳每一段結束字詞的
  * 1-based 全域編號（最後一段不需要列）。Promise<number[]>。
  * provider: { kind: 'openai'|'anthropic', baseUrl, model, key }
+ *
+ * 分批後「併發」送出（最多 3 個同時，各批重試一次），避免長音檔逐批串行
+ * 超出 Vercel 60 秒函式時限（HTTP 504）。
  */
 export async function segmentByAI(provider, { words }) {
   const tokens = (words || []).filter((w) => w.word && w.word.trim());
   if (tokens.length < 3) throw new Error('字詞數量不足（至少 3 個字），無法 AI 分段');
 
   const caller = provider.kind === 'anthropic' ? callAnthropic : callOpenAI;
-  const boundaries = [];
+  const parts = [];
   for (let i = 0; i < tokens.length; i += CHUNK_WORDS) {
-    const part = tokens.slice(i, i + CHUNK_WORDS);
-    const raw = await caller(provider, segPrompt(part));
-    const seen = new Set(boundaries);
+    parts.push({ offset: i, tokens: tokens.slice(i, i + CHUNK_WORDS) });
+  }
+
+  const fetchRaw = async (p) => {
+    try {
+      return await caller(provider, segPrompt(p.tokens));
+    } catch (e) {
+      // 併發時供應商偶發 429/連線錯誤 → 重試一次
+      return caller(provider, segPrompt(p.tokens));
+    }
+  };
+
+  const results = [];
+  const queue = [...parts];
+  const worker = async () => {
+    while (queue.length) {
+      const p = queue.shift();
+      results.push({ offset: p.offset, raw: await fetchRaw(p) });
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(3, parts.length) }, worker));
+
+  const boundaries = [];
+  const seen = new Set();
+  for (const { offset, raw } of results) {
     for (const b of parseBoundaries(raw)) {
-      const g = i + b; // 批次內是 1-based 編號，換算回全域
+      const g = offset + b; // 批次內是 1-based 編號，換算回全域
       if (g > 0 && g <= tokens.length && !seen.has(g)) {
         seen.add(g);
         boundaries.push(g);
       }
     }
   }
+  boundaries.sort((a, b) => a - b);
   if (!boundaries.length) throw new Error('AI 回傳的段界無法使用');
   return boundaries;
 }

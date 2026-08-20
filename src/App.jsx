@@ -205,34 +205,39 @@ function App() {
       const parts = up.chunks?.length
         ? up.chunks
         : [{ blob: up.blob, filename: up.filename, offset: 0 }];
+      // 各塊併發辨識（互不相干），再依序合併時間戳，縮短整體等待時間
+      const chunkResults = await Promise.all(
+        parts.map((part, i) =>
+          apiTranscribe({
+            blob: part.blob,
+            filename: part.filename,
+            language,
+            stt: { provider: stt.provider, model: stt.model, key: stt.key.trim() },
+            onProgress: () =>
+              setProgress({
+                label:
+                  parts.length > 1
+                    ? `辨識中（分 ${parts.length} 段並行）…`
+                    : up.compressed
+                      ? '辨識中（已壓縮音檔）…'
+                      : '正在辨識…',
+                pct: 0.2 + (0.4 * i) / parts.length,
+              }),
+          })
+        )
+      );
       let allWords = [];
       let allSegments = [];
-      for (let i = 0; i < parts.length; i++) {
-        const part = parts[i];
-        const r = await apiTranscribe({
-          blob: part.blob,
-          filename: part.filename,
-          language,
-          stt: { provider: stt.provider, model: stt.model, key: stt.key.trim() },
-          onProgress: () =>
-            setProgress({
-              label:
-                parts.length > 1
-                  ? `辨識中（第 ${i + 1}/${parts.length} 段）…`
-                  : up.compressed
-                    ? '辨識中（已壓縮音檔）…'
-                    : '正在辨識…',
-              pct: 0.2 + (0.4 * i) / parts.length,
-            }),
-        });
+      chunkResults.forEach((r, i) => {
+        const offset = parts[i].offset;
         if (r.words?.length) {
-          allWords.push(...offsetWords(r.words, part.offset));
+          allWords.push(...offsetWords(r.words, offset));
         } else if (r.segments?.length) {
           allSegments.push(
-            ...r.segments.map((s) => ({ ...s, start: s.start + part.offset, end: s.end + part.offset }))
+            ...r.segments.map((s) => ({ ...s, start: s.start + offset, end: s.end + offset }))
           );
         }
-      }
+      });
       const result = { words: allWords, segments: allSegments };
 
       const built = result.words?.length

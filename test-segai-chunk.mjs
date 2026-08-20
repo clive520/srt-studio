@@ -16,14 +16,21 @@ const PROV = { kind: 'openai', baseUrl: 'https://api.groq.com/openai/v1', model:
 const calls = [];
 const prompts = [];
 const responses = ['{"boundaries":[500]}', '{"boundaries":[700]}', '{"boundaries":[300]}', '{"boundaries":[50]}'];
+// 批次併發送出，改依「prompt 內容」判斷是哪一批，避免依呼叫順序誤配回應
 globalThis.fetch = async (url, opts) => {
   calls.push(url);
-  const body = JSON.parse(opts.body);
-  prompts.push(body.messages[0].content);
+  const content = JSON.parse(opts.body).messages[0].content;
+  // 用每批「最後一個字詞」的獨特時間戳判斷是哪一批
+  let which;
+  if (content.includes('999.6-999.9')) which = 2; // 批次3 結尾 500. 字
+  else if (content.includes('799.6-799.9')) which = 1; // 批次2 結尾 1000. 字
+  else if (content.includes('399.6-399.9')) which = 0; // 批次1 結尾 1000. 字
+  else which = 3; // 短音檔（單批 50 字）
+  prompts[which] = content;
   return {
     ok: true,
     json: async () => ({
-      choices: [{ message: { content: responses[prompts.length - 1] } }],
+      choices: [{ message: { content: responses[which] } }],
     }),
   };
 };
@@ -52,7 +59,7 @@ check('段界已排序', boundaries.every((b, i) => i === 0 || boundaries[i - 1]
 
 // 單批（短音檔）行為不變
 const short = await segmentByAI(PROV, { words: words.slice(0, 50) });
-check('短音檔只送 1 批', prompts.length === 4, `calls=${prompts.length}`);
+check('短音檔只送 1 批', calls.length === 4, `calls=${calls.length}`);
 check('短音檔段界正常', JSON.stringify(short) === '[50]', `got=${JSON.stringify(short)}`);
 
 // 所有批次都失敗 → 拋錯（App 端會保留啟發式結果）
