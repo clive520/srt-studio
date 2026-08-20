@@ -5,6 +5,7 @@ import {
   cleanSegments,
   buildSegmentsFromWords,
   buildSegmentsFromRanges,
+  splitLongSegments,
   wordsToText,
   splitWordsAt,
   toSRT,
@@ -209,7 +210,7 @@ function App() {
       });
 
       const built = result.words?.length
-        ? buildSegmentsFromWords(result.words)
+        ? splitLongSegments(buildSegmentsFromWords(result.words))
         : result.segments;
       commitSegments(await convertSegments(cleanSegments(built), outputLang));
       setActiveIdx(0);
@@ -221,7 +222,7 @@ function App() {
             words: result.words,
             seg: { provider: seg.provider, model: seg.model, key: seg.key.trim() },
           });
-          const rebuilt = buildSegmentsFromRanges(result.words, boundaries);
+          const rebuilt = splitLongSegments(buildSegmentsFromRanges(result.words, boundaries));
           if (rebuilt.length < 2) throw new Error('AI 分段結果無法使用');
           commitSegments(await convertSegments(cleanSegments(rebuilt), outputLang));
           setActiveIdx(0);
@@ -400,7 +401,7 @@ function App() {
         words: all,
         seg: { provider: seg.provider, model: seg.model, key: seg.key.trim() },
       });
-      const rebuilt = buildSegmentsFromRanges(all, boundaries);
+      const rebuilt = splitLongSegments(buildSegmentsFromRanges(all, boundaries));
       if (rebuilt.length < 2) throw new Error('AI 分段結果無法使用，請再試一次');
       commitSegments(await convertSegments(cleanSegments(rebuilt), outputLang));
       setActiveIdx(0);

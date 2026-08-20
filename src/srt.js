@@ -98,7 +98,7 @@ const CLAUSE_END = /[，,、：:]$/;
  */
 export function buildSegmentsFromWords(
   words,
-  { maxChars = 42, hardPause = 0.55, softPause = 0.28, minChars = 12 } = {}
+  { maxChars = 24, hardPause = 0.55, softPause = 0.28, minChars = 10 } = {}
 ) {
   const tokens = words.filter((w) => w.word && w.word.trim());
   if (!tokens.length) return [];
@@ -189,6 +189,35 @@ export function buildSegmentsFromRanges(words, boundaries) {
   }
   push(tokens.slice(prev));
   return segs;
+}
+
+/**
+ * 保險：任何超過 maxDur 的段，在其「最大字詞間隙」處遞迴切開，
+ * 保證字幕不會一整句掛在畫面上太久（AI 分段偶爾會切太長時用）。
+ */
+export function splitLongSegments(segs, { maxDur = 5 } = {}) {
+  const out = [];
+  const cut = (s) => {
+    if (s.end - s.start <= maxDur || !s.words || s.words.length < 2) return [s];
+    let best = -1;
+    let bestGap = 0;
+    for (let i = 1; i < s.words.length; i++) {
+      const gap = s.words[i].start - s.words[i - 1].end;
+      if (gap > bestGap) {
+        bestGap = gap;
+        best = i;
+      }
+    }
+    if (best <= 0 || bestGap <= 0) return [s];
+    const a = s.words.slice(0, best);
+    const b = s.words.slice(best);
+    return [
+      ...cut({ ...s, end: a[a.length - 1].end, text: wordsToText(a), words: a }),
+      ...cut({ ...s, start: b[0].start, text: wordsToText(b), words: b }),
+    ];
+  };
+  for (const s of segs) out.push(...cut(s));
+  return out;
 }
 
 /**
