@@ -160,6 +160,11 @@ export function wordsToText(words) {
   return (words || []).map((w) => w.word).join('').replace(/\s+/g, ' ').trim();
 }
 
+/** 分段上傳辨識後合併：把某塊的逐字時間戳加上該塊的起始秒數 */
+export function offsetWords(words, offsetSec) {
+  return (words || []).map((w) => ({ ...w, start: w.start + offsetSec, end: w.end + offsetSec }));
+}
+
 /**
  * 依 AI 給的段界重建字幕段。boundaries 是「每一段最後一個字詞的索引」（1-based），
  * 過濾掉無效值後依序切片，段時間直接採用該段首/尾字的真實時間。

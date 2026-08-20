@@ -6,6 +6,7 @@ import {
   buildSegmentsFromWords,
   buildSegmentsFromRanges,
   splitLongSegments,
+  offsetWords,
   wordsToText,
   splitWordsAt,
   toSRT,
@@ -196,18 +197,43 @@ function App() {
     setBusy(true);
     setProgress({ label: '正在辨識…', pct: 0.2 });
     try {
-      let up = { blob: audioBlob, filename: audioName || 'audio.mp3', compressed: false };
+      let up = { blob: audioBlob, filename: audioName || 'audio.mp3', compressed: false, chunks: null };
       if (audioBlob.size > 4.2 * 1024 * 1024) {
         setProgress({ label: '音檔較大，正在壓縮（16kHz 單聲道）…', pct: 0.1 });
-        up = await prepareUpload(audioBlob, audioName || 'audio.mp3');
+        up = await prepareUpload(audioBlob, audioName || 'audio.mp3', undefined, window.__SRT_TEST_OPTS__ || {});
       }
-      const result = await apiTranscribe({
-        blob: up.blob,
-        filename: up.filename,
-        language,
-        stt: { provider: stt.provider, model: stt.model, key: stt.key.trim() },
-        onProgress: () => setProgress({ label: up.compressed ? '辨識中（已壓縮音檔）…' : '正在辨識…', pct: 0.2 }),
-      });
+      const parts = up.chunks?.length
+        ? up.chunks
+        : [{ blob: up.blob, filename: up.filename, offset: 0 }];
+      let allWords = [];
+      let allSegments = [];
+      for (let i = 0; i < parts.length; i++) {
+        const part = parts[i];
+        const r = await apiTranscribe({
+          blob: part.blob,
+          filename: part.filename,
+          language,
+          stt: { provider: stt.provider, model: stt.model, key: stt.key.trim() },
+          onProgress: () =>
+            setProgress({
+              label:
+                parts.length > 1
+                  ? `辨識中（第 ${i + 1}/${parts.length} 段）…`
+                  : up.compressed
+                    ? '辨識中（已壓縮音檔）…'
+                    : '正在辨識…',
+              pct: 0.2 + (0.4 * i) / parts.length,
+            }),
+        });
+        if (r.words?.length) {
+          allWords.push(...offsetWords(r.words, part.offset));
+        } else if (r.segments?.length) {
+          allSegments.push(
+            ...r.segments.map((s) => ({ ...s, start: s.start + part.offset, end: s.end + part.offset }))
+          );
+        }
+      }
+      const result = { words: allWords, segments: allSegments };
 
       const built = result.words?.length
         ? splitLongSegments(buildSegmentsFromWords(result.words))

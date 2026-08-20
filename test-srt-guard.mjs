@@ -1,5 +1,5 @@
 // splitLongSegments（超過 maxDur 的段在最大字詞間隙處遞迴切開）＋新版分段提示內容
-import { splitLongSegments, buildSegmentsFromRanges } from './src/srt.js';
+import { splitLongSegments, buildSegmentsFromRanges, offsetWords } from './src/srt.js';
 import { segPrompt } from './api/_lib/segment.js';
 
 const results = [];
@@ -62,6 +62,12 @@ check('提示限定每段 8~18 字', p.includes('8~18'), '');
 check('提示要求每段 1.5~4 秒', p.includes('1.5~4 秒'), '');
 check('提示處理無標點逐字稿', p.includes('若沒有標點'), '');
 check('提示禁止切斷名詞短語', p.includes('名詞短語'), '');
+
+// 6. offsetWords：分段上傳辨識後，把各塊時間戳偏移回全域
+const o = offsetWords([{ word: '字', start: 0.5, end: 0.9 }], 600);
+check('第二塊字詞時間 +600 秒', o[0].start === 600.5 && o[0].end === 600.9, `${o[0].start}-${o[0].end}`);
+check('offsetWords 保留其他欄位', o[0].word === '字', '');
+check('空陣列安全', Array.isArray(offsetWords([], 10)) && offsetWords([], 10).length === 0, '');
 
 console.log('\n=== RESULT ===');
 const failed = results.filter((r) => !r.ok);
